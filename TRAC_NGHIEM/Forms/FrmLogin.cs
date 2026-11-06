@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 using TRAC_NGHIEM.BLL;
@@ -16,7 +16,6 @@ namespace TRAC_NGHIEM.Forms
         private Label lblBrandTitle;
         private Label lblBrandSubTitle;
         private Label lblBrandDesc;
-        private Label lblSampleHint;
 
         private Panel pnlRightForm;
         private Label lblFormHeader;
@@ -76,34 +75,16 @@ namespace TRAC_NGHIEM.Forms
 
             lblBrandDesc = new Label
             {
-                Text = "Học viện Công nghệ Bưu chính Viễn thông\n\n" +
-                       "• Quản trị dữ liệu nền & Phân quyền\n" +
-                       "• Ngân hàng câu hỏi & Tổ chức thi\n" +
-                       "• Bảo mật mật khẩu băm SHA-256\n" +
-                       "• Sao lưu & Phục hồi SQL Server",
+                Text = "Học viện Công nghệ Bưu chính Viễn thông",
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(254, 226, 226),
                 Location = new Point(25, 165),
-                Size = new Size(280, 150)
-            };
-
-            lblSampleHint = new Label
-            {
-                Text = "Tài khoản mẫu kiểm thử (MK: 123456):\n" +
-                       "• Giảng viên: admin  hoặc  gv002\n" +
-                       "• Sinh viên (MASV): SV001, SV002...",
-                Font = new Font("Segoe UI", 9F, FontStyle.Italic),
-                ForeColor = Color.White,
-                BackColor = Color.FromArgb(153, 27, 27),
-                Padding = new Padding(10),
-                Location = new Point(25, 340),
-                Size = new Size(280, 75)
+                Size = new Size(280, 30)
             };
 
             pnlLeftBanner.Controls.Add(lblBrandTitle);
             pnlLeftBanner.Controls.Add(lblBrandSubTitle);
             pnlLeftBanner.Controls.Add(lblBrandDesc);
-            pnlLeftBanner.Controls.Add(lblSampleHint);
 
             // 2. Panel bên phải: Khung nhập thông tin đăng nhập
             pnlRightForm = new Panel
