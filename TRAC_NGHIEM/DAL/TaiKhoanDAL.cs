@@ -1,102 +1,111 @@
-﻿using System;
+using System;
 using System.Data;
 using System.Data.SqlClient;
-using TRAC_NGHIEM.Models;
 
 namespace TRAC_NGHIEM.DAL
 {
     /// <summary>
-    /// Lớp truy cập dữ liệu Tài khoản (Đăng nhập, Tạo tài khoản Giảng viên, Đổi mật khẩu)
+    /// Lớp truy cập dữ liệu Tài khoản sử dụng cơ chế SQL Server Login, Database User và Database Role.
+    /// Hoàn toàn không sử dụng bảng TAIKHOAN.
     /// </summary>
     public class TaiKhoanDAL
     {
-        public DataTable CheckLoginRaw(string tenDangNhap, string matKhauHash)
+        /// <summary>
+        /// Mở kết nối trực tiếp tới SQL Server bằng SQL Server Authentication với thông tin người dùng nhập vào,
+        /// sau đó kiểm tra ánh xạ Database User, Role (role_GiaoVien / role_SinhVien) và đối chiếu MAGV / MASV.
+        /// </summary>
+        public DataTable AuthenticateAndGetSessionInfo(string loginName, string password)
         {
-            SqlParameter[] parameters = new SqlParameter[]
-            {
-                new SqlParameter("@TenDangNhap", SqlDbType.NVarChar, 50) { Value = tenDangNhap.Trim() },
-                new SqlParameter("@MatKhauHash", SqlDbType.NVarChar, 100) { Value = matKhauHash }
-            };
+            string userConnStr = DatabaseConnection.BuildUserConnectionString(loginName, password, "TRAC_NGHIEM", true);
+            DataTable dt = new DataTable();
 
-            return DatabaseConnection.ExecuteQuery("dbo.sp_DangNhap", CommandType.StoredProcedure, parameters);
+            using (SqlConnection conn = new SqlConnection(userConnStr))
+            {
+                using (SqlCommand cmd = new SqlCommand("dbo.sp_LayThongTinDangNhapHienTai", conn))
+                {
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.CommandTimeout = 15;
+
+                    using (SqlDataAdapter adapter = new SqlDataAdapter(cmd))
+                    {
+                        conn.Open();
+                        adapter.Fill(dt);
+                    }
+                }
+            }
+
+            return dt;
         }
 
+        /// <summary>
+        /// Lấy danh sách tất cả giáo viên kết hợp trạng thái SQL Server Login, Database User và role_GiaoVien
+        /// </summary>
         public DataTable GetDanhSachTaiKhoanGiaoVien()
         {
-            const string sql = @"
-                SELECT
-                    tk.TENDANGNHAP,
-                    RTRIM(tk.MAGV) AS MAGV,
-                    (gv.HO + N' ' + gv.TEN) AS HOTEN_GV,
-                    tk.QUYEN,
-                    CASE WHEN tk.TRANGTHAI = 1 THEN N'Hoạt động' ELSE N'Đã khóa' END AS TRANGTHAI_TEXT,
-                    tk.TRANGTHAI,
-                    tk.NGAYTAO
-                FROM dbo.TAIKHOAN tk
-                INNER JOIN dbo.GIAOVIEN gv ON tk.MAGV = gv.MAGV
-                WHERE tk.QUYEN = N'GIANGVIEN'
-                ORDER BY tk.NGAYTAO DESC, tk.TENDANGNHAP ASC;";
-
-            return DatabaseConnection.ExecuteQuery(sql, CommandType.Text);
+            return DatabaseConnection.ExecuteQuery("dbo.sp_LayDanhSachTaiKhoanGiaoVien", CommandType.StoredProcedure);
         }
 
+        /// <summary>
+        /// Lấy danh sách giáo viên chưa được cấp SQL Server Login
+        /// </summary>
         public DataTable GetGiaoVienChuaCoTaiKhoan()
         {
-            const string sql = @"
-                SELECT
-                    RTRIM(gv.MAGV) AS MAGV,
-                    gv.HO,
-                    gv.TEN,
-                    (RTRIM(gv.MAGV) + N' - ' + gv.HO + N' ' + gv.TEN) AS HIENTHI
-                FROM dbo.GIAOVIEN gv
-                LEFT JOIN dbo.TAIKHOAN tk ON tk.MAGV = gv.MAGV
-                WHERE tk.TENDANGNHAP IS NULL
-                ORDER BY gv.MAGV ASC;";
-
-            return DatabaseConnection.ExecuteQuery(sql, CommandType.Text);
+            return DatabaseConnection.ExecuteQuery("dbo.sp_LayGiaoVienChuaCoTaiKhoan", CommandType.StoredProcedure);
         }
 
-        public void TaoTaiKhoanGiaoVien(string nguoiThucHien, string maGV, string tenDangNhap, string matKhauHash, bool trangThai)
+        /// <summary>
+        /// Tạo SQL Server Login, Database User và gán vào role_GiaoVien cho giáo viên (qua Stored Procedure ký Certificate)
+        /// </summary>
+        public void TaoTaiKhoanGiaoVien(string maGV, string tenDangNhap, string matKhauPlain)
         {
             SqlParameter[] parameters = new SqlParameter[]
             {
-                new SqlParameter("@NguoiThucHien", SqlDbType.NVarChar, 50) { Value = nguoiThucHien },
                 new SqlParameter("@MaGV", SqlDbType.NChar, 8) { Value = maGV.Trim().ToUpperInvariant() },
-                new SqlParameter("@TenDangNhap", SqlDbType.NVarChar, 50) { Value = tenDangNhap.Trim() },
-                new SqlParameter("@MatKhauHash", SqlDbType.NVarChar, 100) { Value = matKhauHash },
-                new SqlParameter("@TrangThai", SqlDbType.Bit) { Value = trangThai }
+                new SqlParameter("@TenDangNhap", SqlDbType.NVarChar, 50) { Value = tenDangNhap.Trim().ToUpperInvariant() },
+                new SqlParameter("@MatKhauPlain", SqlDbType.NVarChar, 128) { Value = matKhauPlain }
             };
 
             DatabaseConnection.ExecuteNonQuery("dbo.sp_TaoTaiKhoanGiaoVien", CommandType.StoredProcedure, parameters);
         }
 
-        public void CapNhatTrangThaiTaiKhoan(string tenDangNhap, bool trangThaiMoi)
+        /// <summary>
+        /// Thu hồi (vô hiệu hóa) SQL Server Login của giáo viên (ALTER LOGIN [...] DISABLE)
+        /// </summary>
+        public void ThuHoiTaiKhoanGiaoVien(string maGV)
         {
-            const string sql = @"
-                UPDATE dbo.TAIKHOAN
-                SET TRANGTHAI = @TrangThai
-                WHERE TENDANGNHAP = @TenDangNhap;";
-
-            SqlParameter[] parameters = new SqlParameter[]
+            SqlParameter param = new SqlParameter("@MaGV", SqlDbType.NChar, 8)
             {
-                new SqlParameter("@TrangThai", SqlDbType.Bit) { Value = trangThaiMoi },
-                new SqlParameter("@TenDangNhap", SqlDbType.NVarChar, 50) { Value = tenDangNhap.Trim() }
+                Value = maGV.Trim().ToUpperInvariant()
             };
 
-            DatabaseConnection.ExecuteNonQuery(sql, CommandType.Text, parameters);
+            DatabaseConnection.ExecuteNonQuery("dbo.sp_ThuHoiTaiKhoanGiaoVien", CommandType.StoredProcedure, param);
         }
 
-        public void DoiMatKhau(string tenDangNhap, string matKhauHienTaiHash, string matKhauMoiHash)
+        /// <summary>
+        /// Kích hoạt lại SQL Server Login đã bị thu hồi của giáo viên (ALTER LOGIN [...] ENABLE)
+        /// </summary>
+        public void KichHoatLaiTaiKhoanGiaoVien(string maGV)
+        {
+            SqlParameter param = new SqlParameter("@MaGV", SqlDbType.NChar, 8)
+            {
+                Value = maGV.Trim().ToUpperInvariant()
+            };
+
+            DatabaseConnection.ExecuteNonQuery("dbo.sp_KichHoatLaiTaiKhoanGiaoVien", CommandType.StoredProcedure, param);
+        }
+
+        /// <summary>
+        /// Đổi mật khẩu của chính SQL Server Login đang đăng nhập (ALTER LOGIN ... WITH PASSWORD ... OLD_PASSWORD ...)
+        /// </summary>
+        public void DoiMatKhau(string matKhauHienTaiPlain, string matKhauMoiPlain)
         {
             SqlParameter[] parameters = new SqlParameter[]
             {
-                new SqlParameter("@TenDangNhap", SqlDbType.NVarChar, 50) { Value = tenDangNhap.Trim() },
-                new SqlParameter("@MatKhauHienTaiHash", SqlDbType.NVarChar, 100) { Value = matKhauHienTaiHash },
-                new SqlParameter("@MatKhauMoiHash", SqlDbType.NVarChar, 100) { Value = matKhauMoiHash }
+                new SqlParameter("@MatKhauHienTai", SqlDbType.NVarChar, 128) { Value = matKhauHienTaiPlain },
+                new SqlParameter("@MatKhauMoi", SqlDbType.NVarChar, 128) { Value = matKhauMoiPlain }
             };
 
             DatabaseConnection.ExecuteNonQuery("dbo.sp_DoiMatKhau", CommandType.StoredProcedure, parameters);
         }
     }
 }
-

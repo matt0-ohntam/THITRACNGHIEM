@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
@@ -6,17 +6,19 @@ using System.Data.SqlClient;
 namespace TRAC_NGHIEM.DAL
 {
     /// <summary>
-    /// Lớp quản lý kết nối cơ sở dữ liệu SQL Server tập trung bằng ADO.NET.
-    /// Đọc ConnectionString từ App.config, sử dụng Parameterized Query và giải phóng tài nguyên bằng khối using.
+    /// Lớp quản lý kết nối cơ sở dữ liệu SQL Server bằng ADO.NET.
+    /// Sử dụng SQL Server Authentication theo từng tài khoản người dùng (Giáo viên / Sinh viên).
+    /// Tuyệt đối không lưu cố định username/password hay tài khoản sa trong App.config.
     /// </summary>
     public static class DatabaseConnection
     {
         private const string ConnectionName = "TRAC_NGHIEM_DB";
+        private static string _activeUserConnectionString = null;
 
         /// <summary>
-        /// Lấy chuỗi kết nối tới database TRAC_NGHIEM từ App.config
+        /// Lấy cấu hình máy chủ và tên database nền từ App.config (không chứa thông tin đăng nhập cố định)
         /// </summary>
-        public static string GetConnectionString()
+        private static string GetBaseServerConnectionString()
         {
             ConnectionStringSettings settings = ConfigurationManager.ConnectionStrings[ConnectionName];
             if (settings == null || string.IsNullOrWhiteSpace(settings.ConnectionString))
@@ -28,18 +30,75 @@ namespace TRAC_NGHIEM.DAL
         }
 
         /// <summary>
-        /// Lấy chuỗi kết nối tới database master (phục vụ chức năng Backup / Restore an toàn)
+        /// Tạo chuỗi kết nối SQL Server Authentication động từ thông tin đăng nhập của người dùng
         /// </summary>
-        public static string GetMasterConnectionString()
+        public static string BuildUserConnectionString(string loginName, string password, string initialCatalog = "TRAC_NGHIEM", bool pooling = true)
         {
-            SqlConnectionStringBuilder builder = new SqlConnectionStringBuilder(GetConnectionString());
-            builder.InitialCatalog = "master";
-            builder.Pooling = false; // Không giữ connection pool khi thao tác Restore
+            if (string.IsNullOrWhiteSpace(loginName))
+            {
+                throw new ArgumentException("Tên đăng nhập SQL Server không được để trống!", "loginName");
+            }
+
+            SqlConnectionStringBuilder builder = new SqlConnectionStringBuilder(GetBaseServerConnectionString())
+            {
+                InitialCatalog = string.IsNullOrWhiteSpace(initialCatalog) ? "TRAC_NGHIEM" : initialCatalog,
+                IntegratedSecurity = false,
+                UserID = loginName.Trim(),
+                Password = password ?? string.Empty,
+                TrustServerCertificate = true,
+                ConnectTimeout = 10,
+                Pooling = pooling,
+                ApplicationName = "PTIT_TRAC_NGHIEM_WINFORMS"
+            };
+
             return builder.ConnectionString;
         }
 
         /// <summary>
-        /// Khởi tạo đối tượng SqlConnection mới tới database TRAC_NGHIEM
+        /// Thiết lập chuỗi kết nối của phiên người dùng sau khi SQL Server xác thực thành công
+        /// </summary>
+        public static void SetAuthenticatedUserConnection(string loginName, string password)
+        {
+            _activeUserConnectionString = BuildUserConnectionString(loginName, password, "TRAC_NGHIEM", true);
+        }
+
+        /// <summary>
+        /// Giải phóng kết nối và xóa thông tin xác thực khi người dùng đăng xuất
+        /// </summary>
+        public static void ClearAuthenticatedConnection()
+        {
+            _activeUserConnectionString = null;
+            SqlConnection.ClearAllPools();
+        }
+
+        /// <summary>
+        /// Lấy chuỗi kết nối của người dùng đang đăng nhập hiện tại
+        /// </summary>
+        public static string GetConnectionString()
+        {
+            if (string.IsNullOrWhiteSpace(_activeUserConnectionString))
+            {
+                throw new InvalidOperationException(
+                    "Chưa có phiên kết nối SQL Server hợp lệ. Vui lòng đăng nhập bằng tài khoản SQL Server Login!");
+            }
+            return _activeUserConnectionString;
+        }
+
+        /// <summary>
+        /// Lấy chuỗi kết nối tới database master theo tài khoản hiện tại (phục vụ kiểm tra / Restore khi có quyền)
+        /// </summary>
+        public static string GetMasterConnectionString()
+        {
+            SqlConnectionStringBuilder builder = new SqlConnectionStringBuilder(GetConnectionString())
+            {
+                InitialCatalog = "master",
+                Pooling = false
+            };
+            return builder.ConnectionString;
+        }
+
+        /// <summary>
+        /// Khởi tạo đối tượng SqlConnection mới tới database TRAC_NGHIEM bằng quyền của người dùng hiện tại
         /// </summary>
         public static SqlConnection GetConnection()
         {
@@ -47,7 +106,7 @@ namespace TRAC_NGHIEM.DAL
         }
 
         /// <summary>
-        /// Kiểm tra kết nối tới SQL Server và database TRAC_NGHIEM
+        /// Kiểm tra kết nối của phiên hiện tại tới SQL Server và database TRAC_NGHIEM
         /// </summary>
         public static bool TestConnection(out string errorMessage)
         {
@@ -161,9 +220,20 @@ namespace TRAC_NGHIEM.DAL
                 case 53:
                     return "Không thể kết nối đến máy chủ SQL Server. Vui lòng kiểm tra dịch vụ SQL Server (MSSQLSERVER) đã chạy chưa!";
                 case 4060:
-                    return "Không thể mở cơ sở dữ liệu 'TRAC_NGHIEM'. Vui lòng kiểm tra database đã được khởi tạo chưa!";
+                    return "Tài khoản SQL Login này chưa được ánh xạ (cấp quyền Database User) vào cơ sở dữ liệu 'TRAC_NGHIEM'!";
                 case 18456:
-                    return "Đăng nhập SQL Server thất bại (Không đủ quyền xác thực)!";
+                    return "Đăng nhập không thành công: Tên đăng nhập (SQL Login), mật khẩu không chính xác hoặc tài khoản đã bị vô hiệu hóa!";
+                case 18470:
+                    return "Tài khoản SQL Server Login này đã bị thu hồi (vô hiệu hóa - DISABLED)! Không thể đăng nhập.";
+                case 229:
+                case 230:
+                    return "Từ chối truy cập trên SQL Server: Tài khoản hiện tại không được phân quyền thực hiện thao tác này!";
+                case 15025:
+                    return "SQL Server Login này đã tồn tại trên máy chủ!";
+                case 15023:
+                    return "Database User này đã tồn tại trong cơ sở dữ liệu TRAC_NGHIEM!";
+                case 15118:
+                    return "Mật khẩu không đáp ứng chính sách độ phức tạp của hệ thống (CHECK_POLICY)!";
                 case 2627:
                 case 2601:
                     return "Dữ liệu bị trùng lặp (Vi phạm ràng buộc khóa chính hoặc UNIQUE): " + ex.Message;
@@ -175,4 +245,3 @@ namespace TRAC_NGHIEM.DAL
         }
     }
 }
-

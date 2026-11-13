@@ -1,0 +1,28 @@
+﻿[PASS] TC01 - Xóa bảng TAIKHOAN, hệ thống hoạt động bình thường với SQL Login | Đăng nhập SQL Server thành công! Xin chào Nguyễn Văn An (Giáo viên - Role: role_GiaoVien).
+[PASS] TC02 - Đăng nhập giáo viên hợp lệ (GV-8-4 -> role_GiaoVien) | Đăng nhập SQL Server thành công! Xin chào Đặng Quốc Huy (Giáo viên - Role: role_GiaoVien).
+[PASS] TC03 - Đăng nhập giáo viên sai mật khẩu (Từ chối đăng nhập) | Đăng nhập không thành công: Tên đăng nhập (SQL Login), mật khẩu không chính xác hoặc tài khoản đã bị vô hiệu hóa!
+[PASS] TC07 - Tạo SQL Login + Database User + role_GiaoVien cho GV-T01 | Đã tạo SQL Server Login [GV-T01], Database User [GV-T01] và gán vào [role_GiaoVien] thành công!
+[PASS] TC08 - Chặn tạo tài khoản trùng SQL Login (GV-T01) | SQL Server Login [GV-T01] đã tồn tại! Mỗi giáo viên chỉ có một tài khoản duy nhất.
+[PASS] TC09 - Chặn tạo tài khoản cho MAGV không tồn tại (GV999) | Mã giáo viên [GV999] không tồn tại trong bảng GIAOVIEN!
+[PASS] TC10 - Thu hồi tài khoản giáo viên (ALTER LOGIN [GV-T01] DISABLE) | Đã thu hồi (vô hiệu hóa) tài khoản SQL Server Login [GV-T01] thành công! Giáo viên này không thể đăng nhập mới.
+[PASS] TC04 - Chặn đăng nhập bằng SQL Login đã bị DISABLE (GV-T01) | Tài khoản SQL Server Login này đã bị thu hồi (vô hiệu hóa - DISABLED)! Không thể đăng nhập.
+[PASS] TC11 - Kích hoạt lại SQL Login GV-T01 và đăng nhập thành công | Đăng nhập SQL Server thành công! Xin chào Nguyễn Kiểm Thử (Giáo viên - Role: role_GiaoVien).
+[PASS] TC12 - Chặn tự thu hồi tài khoản đang đăng nhập (GV-T01) | Không thể tự thu hồi (vô hiệu hóa) tài khoản SQL Login đang đăng nhập của chính bạn!
+[PASS] TC13 - Kiểm tra Tổng quan (Tổng GV=5, Có Login=3, Active=3, Disabled=0, Chưa cấp=2) | Khớp 100% giữa GIAOVIEN và sys.server_principals
+[PASS] TC14 - Kiểm tra hiển thị đúng mã GV-8-4 ở cả danh sách và Tổng quan | GV-8-4: Đang hoạt động
+[PASS] TC15 - Đổi mật khẩu giáo viên bằng ALTER LOGIN ... OLD_PASSWORD | Đổi mật khẩu SQL Server Login thành công!
+[PASS] TC05 - Đăng nhập sinh viên hợp lệ (SV001 -> role_SinhVien) | Đăng nhập SQL Server thành công! Xin chào Lê Văn Nam (Sinh viên - Role: role_SinhVien).
+[PASS] TC06 - Chặn sinh viên truy cập chức năng quản trị ở cả C# và SQL Role | Từ chối truy cập: Tài khoản SQL Login [SV001] thuộc role_SinhVien, không có quyền thực hiện chức năng [Thêm môn học]!
+[PASS] TC16 - Chặn SQL Injection tại màn hình Đăng nhập | Tất cả payload đều bị từ chối
+[PASS] TC17 - Chặn SQL Injection tại ô Tìm kiếm (Không lộ dữ liệu, không lỗi cú pháp) | An toàn tuyệt đối
+[PASS] TC18 - Kiểm tra khởi tạo và thao tác các nút bấm trên toàn bộ Form | Tất cả Form (FrmMain, FrmMonHoc, FrmLopSinhVien, FrmGiaoVien, FrmTaoTaiKhoan, FrmDoiMatKhau, FrmBackupRestore) và các nút chức năng hoạt động chính xác.
+[PASS] TC19 - Sao lưu (Full Backup) CSDL TRAC_NGHIEM bằng quyền GV001 (role_GiaoVien) | Sao lưu (Backup) cơ sở dữ liệu [TRAC_NGHIEM] thành công! Đường dẫn file: C:\THITRACNGHIEM\backup\TRAC_NGHIEM_Full.bak
+[PASS] TC20 - Chặn đường dẫn Backup sai & từ chối file không phải định dạng .bak | File sao lưu (.bak) KHÔNG hợp lệ hoặc bị hỏng: The volume on device 'C:\THITRACNGHIEM\DATABASE_CONTRACT.md' is empty.
+VERIFY DATABASE is terminating abnormally.
+The volume on device 'C:\THITRACNGHIEM\DATABASE_CONTRACT.md' is empty.
+RESTORE HEADERONLY is terminating abnormally.
+[PASS] TC21 - Kiểm tra file .bak hợp lệ bằng RESTORE VERIFYONLY & HEADERONLY | File hợp lệ | DB: TRAC_NGHIEM | Máy chủ: LAPTOP-AEK7186T | Ngày sao lưu: 11/13/2026 12:08:42 PM
+[PASS] TC22 - Phục hồi (Restore) CSDL TRAC_NGHIEM an toàn & kiểm tra dữ liệu sau phục hồi | Phục hồi (Restore) cơ sở dữ liệu [TRAC_NGHIEM] thành công và đã kết nối lại an toàn!
+==================================================================
+KẾT QUẢ TỔNG HỢP: 22/22 TEST CASE (GỒM BACKUP & RESTORE) ĐẠT 100% (PASS)
+==================================================================

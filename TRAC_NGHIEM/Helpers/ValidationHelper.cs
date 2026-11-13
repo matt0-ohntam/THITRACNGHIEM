@@ -1,16 +1,17 @@
-﻿using System;
+using System;
 using System.Text.RegularExpressions;
 
 namespace TRAC_NGHIEM.Helpers
 {
     /// <summary>
-    /// Lớp kiểm tra tính hợp lệ dữ liệu đầu vào (Input Validation)
+    /// Lớp kiểm tra tính hợp lệ dữ liệu đầu vào (Input Validation) & chống SQL Injection ở tầng nhập liệu
     /// </summary>
     public static class ValidationHelper
     {
-        private static readonly Regex CodeRegex = new Regex(@"^[A-Z0-9_]+$", RegexOptions.Compiled);
+        // Hỗ trợ chữ cái A-Z, số 0-9, dấu gạch dưới (_) và dấu gạch ngang (-) cho các mã như GV-8-4
+        private static readonly Regex CodeRegex = new Regex(@"^[A-Z0-9_\-]+$", RegexOptions.Compiled);
         private static readonly Regex PhoneRegex = new Regex(@"^0[0-9]{8,11}$", RegexOptions.Compiled);
-        private static readonly Regex UsernameRegex = new Regex(@"^[a-zA-Z0-9_.\-]+$", RegexOptions.Compiled);
+        private static readonly Regex UsernameRegex = new Regex(@"^[a-zA-Z0-9_\-]+$", RegexOptions.Compiled);
 
         public static string NormalizeCode(string code)
         {
@@ -41,7 +42,7 @@ namespace TRAC_NGHIEM.Helpers
             }
             if (!CodeRegex.IsMatch(normalized))
             {
-                errorMessage = string.Format("{0} chỉ được chứa chữ cái không dấu (A-Z), chữ số (0-9) và không có khoảng trắng!", fieldLabel);
+                errorMessage = string.Format("{0} chỉ được chứa chữ cái không dấu (A-Z), chữ số (0-9), dấu gạch ngang (-) hoặc gạch dưới (_) và không có khoảng trắng!", fieldLabel);
                 return false;
             }
             errorMessage = string.Empty;
@@ -95,17 +96,17 @@ namespace TRAC_NGHIEM.Helpers
             string trimmed = (username ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(trimmed))
             {
-                errorMessage = "Tên đăng nhập không được để trống!";
+                errorMessage = "Tên đăng nhập (SQL Login) không được để trống!";
                 return false;
             }
-            if (trimmed.Length < 3 || trimmed.Length > 50)
+            if (trimmed.Length < 2 || trimmed.Length > 50)
             {
-                errorMessage = "Tên đăng nhập phải có độ dài từ 3 đến 50 ký tự!";
+                errorMessage = "Tên đăng nhập phải có độ dài từ 2 đến 50 ký tự!";
                 return false;
             }
             if (!UsernameRegex.IsMatch(trimmed))
             {
-                errorMessage = "Tên đăng nhập chỉ được chứa chữ cái không dấu, chữ số, dấu gạch dưới (_) hoặc dấu chấm (.)!";
+                errorMessage = "Tên đăng nhập (SQL Login) chỉ được chứa chữ cái không dấu, chữ số, dấu gạch ngang (-) hoặc gạch dưới (_)!";
                 return false;
             }
             errorMessage = string.Empty;
@@ -113,4 +114,3 @@ namespace TRAC_NGHIEM.Helpers
         }
     }
 }
-

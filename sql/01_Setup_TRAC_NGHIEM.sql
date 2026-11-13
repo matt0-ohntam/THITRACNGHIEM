@@ -3,16 +3,17 @@
   FILE: 01_Setup_TRAC_NGHIEM.sql
   PHỤ TRÁCH: NGƯỜI 1 – QUẢN TRỊ VÀ DỮ LIỆU NỀN
   MÔ TẢ:
-    1. Xóa database TRAC_NGHIEM cũ (nếu có) và tạo mới sạch sẽ.
-    2. Tạo 4 bảng nền của Người 1: LOP, MONHOC, SINHVIEN, GIAOVIEN.
-    3. Tạo bảng quản trị tài khoản & phân quyền: TAIKHOAN.
-    4. Tạo 3 bảng nghiệp vụ thi của Người 2: BODE, GIAOVIEN_DANGKY, BANGDIEM.
-    5. Thiết lập đầy đủ PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK, DEFAULT.
-    6. Tạo các INDEX tối ưu truy vấn tìm kiếm và lọc Subform.
-    7. Tạo các VIEW phục vụ hiển thị dữ liệu.
-    8. Tạo các TRIGGER bảo vệ toàn vẹn dữ liệu lịch sử thi.
-    9. Tạo các STORED PROCEDURE có TRANSACTION (ACID).
-   10. Nạp dữ liệu mẫu chuẩn (mật khẩu băm SHA-256).
+    1. Tạo mới cơ sở dữ liệu TRAC_NGHIEM (hoặc cập nhật nếu chạy lại).
+    2. Tạo đúng 4 bảng nền của Người 1: LOP, MONHOC, SINHVIEN, GIAOVIEN.
+    3. Tạo đúng 3 bảng nghiệp vụ thi của Người 2: BODE, GIAOVIEN_DANGKY, BANGDIEM.
+       (TUYỆT ĐỐI KHÔNG SỬ DỤNG BẢNG TAIKHOAN HAY VAITRO).
+    4. Thiết lập đầy đủ PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK, DEFAULT, INDEX.
+    5. Tạo Database Role: role_GiaoVien, role_SinhVien và phân quyền tối thiểu.
+    6. Tạo các VIEW, TRIGGER và STORED PROCEDURE bảo mật, chống SQL Injection.
+    7. Thiết lập Certificate Signing (cert_QuanLyTaiKhoan_TracNghiem) cho các
+       Stored Procedure quản trị Login/User mà không cần quyền sa/sysadmin ở ứng dụng.
+    8. Nạp dữ liệu mẫu và khởi tạo SQL Server Login + Database User cho
+       Giáo viên (GV001, GV002, GV-8-4) và Sinh viên (SV001..SV006).
 ==============================================================================*/
 
 USE master;
@@ -37,7 +38,7 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 /*==============================================================================
-  PHẦN 2: TẠO CÁC BẢNG DỮ LIỆU NỀN (NGƯỜI 1 QUẢN LÝ)
+  PHẦN 2: TẠO CÁC BẢNG DỮ LIỆU NỀN (NGƯỜI 1 QUẢN LÝ) - KHÔNG CÓ BẢNG TAIKHOAN
 ==============================================================================*/
 
 -- 2.1. Bảng LOP
@@ -115,27 +116,6 @@ CREATE TABLE dbo.GIAOVIEN (
 );
 GO
 
--- 2.5. Bảng TAIKHOAN (Quản lý đăng nhập, mật khẩu SHA-256, phân quyền, trạng thái)
-CREATE TABLE dbo.TAIKHOAN (
-    TENDANGNHAP NVARCHAR(50)    NOT NULL,
-    MATKHAU     NVARCHAR(100)   NOT NULL,
-    MAGV        NCHAR(8)        NULL,
-    MASV        NCHAR(8)        NULL,
-    QUYEN       NVARCHAR(20)    NOT NULL,
-    TRANGTHAI   BIT             NOT NULL CONSTRAINT DF_TaiKhoan_TrangThai DEFAULT (1),
-    NGAYTAO     DATETIME        NOT NULL CONSTRAINT DF_TaiKhoan_NgayTao DEFAULT (GETDATE()),
-    CONSTRAINT PK_TaiKhoan PRIMARY KEY (TENDANGNHAP),
-    CONSTRAINT FK_TaiKhoan_Giaovien FOREIGN KEY (MAGV) REFERENCES dbo.GIAOVIEN (MAGV),
-    CONSTRAINT FK_TaiKhoan_Sinhvien FOREIGN KEY (MASV) REFERENCES dbo.SINHVIEN (MASV),
-    CONSTRAINT CK_TaiKhoan_Quyen CHECK (QUYEN IN (N'GIANGVIEN', N'SINHVIEN')),
-    CONSTRAINT CK_TaiKhoan_LienKet CHECK (
-        (QUYEN = N'GIANGVIEN' AND MAGV IS NOT NULL AND MASV IS NULL)
-        OR
-        (QUYEN = N'SINHVIEN' AND MASV IS NOT NULL AND MAGV IS NULL)
-    )
-);
-GO
-
 /*==============================================================================
   PHẦN 3: TẠO CÁC BẢNG NGHIỆP VỤ THI (HỢP ĐỒNG TÍCH HỢP VỚI NGƯỜI 2)
 ==============================================================================*/
@@ -198,27 +178,14 @@ CREATE TABLE dbo.BANGDIEM (
 GO
 
 /*==============================================================================
-  PHẦN 4: THIẾT LẬP INDEX (CHỈ MỤC TỐI ƯU HIỆU NĂNG VÀ RÀNG BUỘC 1-1)
+  PHẦN 4: THIẾT LẬP INDEX & DATABASE ROLE
 ==============================================================================*/
 
--- 4.1. Filtered Unique Index đảm bảo mỗi Giảng viên / Sinh viên chỉ có tối đa 1 tài khoản
-CREATE UNIQUE NONCLUSTERED INDEX UX_TaiKhoan_MAGV
-ON dbo.TAIKHOAN (MAGV)
-WHERE MAGV IS NOT NULL;
-GO
-
-CREATE UNIQUE NONCLUSTERED INDEX UX_TaiKhoan_MASV
-ON dbo.TAIKHOAN (MASV)
-WHERE MASV IS NOT NULL;
-GO
-
--- 4.2. Index tối ưu lọc danh sách sinh viên theo lớp trên Subform
 CREATE NONCLUSTERED INDEX IX_SinhVien_MaLop_DaXoa
 ON dbo.SINHVIEN (MALOP, DAXOA)
 INCLUDE (HO, TEN, NGAYSINH, DIACHI);
 GO
 
--- 4.3. Index tối ưu tìm kiếm Sinh viên và Giáo viên theo Tên, Họ
 CREATE NONCLUSTERED INDEX IX_SinhVien_Ten_Ho
 ON dbo.SINHVIEN (TEN, HO);
 GO
@@ -227,16 +194,20 @@ CREATE NONCLUSTERED INDEX IX_GiaoVien_Ten_Ho
 ON dbo.GIAOVIEN (TEN, HO);
 GO
 
--- 4.4. Index tối ưu kiểm tra câu hỏi theo Môn học & Trình độ
 CREATE NONCLUSTERED INDEX IX_BODE_MaMH_TrinhDo
 ON dbo.BODE (MAMH, TRINHDO);
+GO
+
+-- Tạo 2 Database Role chuẩn theo đề
+CREATE ROLE [role_GiaoVien];
+CREATE ROLE [role_SinhVien];
 GO
 
 /*==============================================================================
   PHẦN 5: TẠO CÁC VIEW PHỤC VỤ TRUY VẤN & BÁO CÁO
 ==============================================================================*/
 
--- 5.1. View Danh sách môn học (chỉ lấy các môn chưa xóa mềm + thống kê tham chiếu)
+-- 5.1. View Danh sách môn học
 CREATE VIEW dbo.vw_DanhSachMonHoc
 AS
 SELECT
@@ -261,7 +232,7 @@ SELECT
 FROM dbo.LOP l;
 GO
 
--- 5.3. View Danh sách sinh viên theo lớp
+-- 5.3. View Danh sách sinh viên theo lớp (Đối chiếu trạng thái SQL Login)
 CREATE VIEW dbo.vw_DanhSachSinhVienTheoLop
 AS
 SELECT
@@ -274,15 +245,24 @@ SELECT
     RTRIM(sv.MALOP) AS MALOP,
     l.TENLOP,
     sv.DAXOA,
-    ISNULL(tk.TRANGTHAI, 0) AS TRANGTHAI_TK,
+    CASE
+        WHEN sp.principal_id IS NOT NULL AND sp.is_disabled = 0 AND dp.principal_id IS NOT NULL THEN 1
+        ELSE 0
+    END AS TRANGTHAI_TK,
     (SELECT COUNT(*) FROM dbo.BANGDIEM bd WHERE bd.MASV = sv.MASV) AS SO_LAN_THI
 FROM dbo.SINHVIEN sv
 INNER JOIN dbo.LOP l ON sv.MALOP = l.MALOP
-LEFT JOIN dbo.TAIKHOAN tk ON tk.MASV = sv.MASV
+LEFT JOIN sys.server_principals sp
+    ON sp.name = RTRIM(sv.MASV) COLLATE DATABASE_DEFAULT
+   AND sp.type = 'S'
+LEFT JOIN sys.database_principals dp
+    ON dp.sid = sp.sid
+   AND dp.type = 'S'
+   AND dp.name = RTRIM(sv.MASV) COLLATE DATABASE_DEFAULT
 WHERE sv.DAXOA = 0;
 GO
 
--- 5.4. View Danh sách giáo viên kèm trạng thái tài khoản
+-- 5.4. View Danh sách giáo viên kèm trạng thái SQL Server Login
 CREATE VIEW dbo.vw_DanhSachGiaoVien
 AS
 SELECT
@@ -292,20 +272,75 @@ SELECT
     (gv.HO + N' ' + gv.TEN) AS HOTEN,
     RTRIM(ISNULL(gv.SODTLL, N'')) AS SODTLL,
     ISNULL(gv.DIACHI, N'') AS DIACHI,
-    tk.TENDANGNHAP,
-    CASE WHEN tk.TENDANGNHAP IS NOT NULL THEN 1 ELSE 0 END AS CO_TAI_KHOAN,
-    ISNULL(tk.TRANGTHAI, 0) AS TRANGTHAI_TK,
+    CASE
+        WHEN sp.principal_id IS NOT NULL
+         AND dp.principal_id IS NOT NULL
+         AND EXISTS (
+             SELECT 1
+             FROM sys.database_role_members drm
+             INNER JOIN sys.database_principals r ON drm.role_principal_id = r.principal_id
+             WHERE drm.member_principal_id = dp.principal_id
+               AND r.name = N'role_GiaoVien'
+         )
+        THEN sp.name
+        ELSE NULL
+    END AS TENDANGNHAP,
+    CASE
+        WHEN sp.principal_id IS NOT NULL
+         AND dp.principal_id IS NOT NULL
+         AND EXISTS (
+             SELECT 1
+             FROM sys.database_role_members drm
+             INNER JOIN sys.database_principals r ON drm.role_principal_id = r.principal_id
+             WHERE drm.member_principal_id = dp.principal_id
+               AND r.name = N'role_GiaoVien'
+         )
+        THEN 1
+        ELSE 0
+    END AS CO_TAI_KHOAN,
+    CASE
+        WHEN sp.principal_id IS NOT NULL
+         AND dp.principal_id IS NOT NULL
+         AND sp.is_disabled = 0
+         AND EXISTS (
+             SELECT 1
+             FROM sys.database_role_members drm
+             INNER JOIN sys.database_principals r ON drm.role_principal_id = r.principal_id
+             WHERE drm.member_principal_id = dp.principal_id
+               AND r.name = N'role_GiaoVien'
+         )
+        THEN 1
+        ELSE 0
+    END AS TRANGTHAI_TK,
+    CASE
+        WHEN sp.principal_id IS NULL OR dp.principal_id IS NULL
+          OR NOT EXISTS (
+             SELECT 1
+             FROM sys.database_role_members drm
+             INNER JOIN sys.database_principals r ON drm.role_principal_id = r.principal_id
+             WHERE drm.member_principal_id = dp.principal_id
+               AND r.name = N'role_GiaoVien'
+          )
+        THEN N'Chưa tạo'
+        WHEN sp.is_disabled = 1 THEN N'Đã vô hiệu hóa'
+        ELSE N'Đang hoạt động'
+    END AS TRANGTHAI_MOTA,
     (SELECT COUNT(*) FROM dbo.BODE b WHERE b.MAGV = gv.MAGV) AS SO_CAU_DA_SOAN,
     (SELECT COUNT(*) FROM dbo.GIAOVIEN_DANGKY dk WHERE dk.MAGV = gv.MAGV) AS SO_LICH_DANG_KY
 FROM dbo.GIAOVIEN gv
-LEFT JOIN dbo.TAIKHOAN tk ON tk.MAGV = gv.MAGV;
+LEFT JOIN sys.server_principals sp
+    ON sp.name = RTRIM(gv.MAGV) COLLATE DATABASE_DEFAULT
+   AND sp.type = 'S'
+LEFT JOIN sys.database_principals dp
+    ON dp.sid = sp.sid
+   AND dp.type = 'S'
+   AND dp.name = RTRIM(gv.MAGV) COLLATE DATABASE_DEFAULT;
 GO
 
 /*==============================================================================
   PHẦN 6: TẠO CÁC TRIGGER BẢO VỆ DỮ LIỆU CÓ LỊCH SỬ THI
 ==============================================================================*/
 
--- 6.1. Trigger bảo vệ không cho xóa mềm hoặc xóa cứng Môn học đã có dữ liệu thi
 CREATE TRIGGER dbo.trg_MonHoc_ProtectHistory
 ON dbo.MONHOC
 AFTER UPDATE, DELETE
@@ -313,7 +348,6 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- Kiểm tra khi UPDATE DAXOA từ 0 -> 1 hoặc khi DELETE
     IF EXISTS (
         SELECT 1
         FROM deleted d
@@ -333,8 +367,6 @@ BEGIN
 END;
 GO
 
--- 6.2. Trigger bảo vệ không cho xóa mềm hoặc xóa cứng Sinh viên đã có điểm thi
---      đồng thời tự động khóa/mở tài khoản sinh viên khi xóa mềm / phục hồi
 CREATE TRIGGER dbo.trg_SinhVien_ProtectAndSyncAccount
 ON dbo.SINHVIEN
 AFTER UPDATE, DELETE
@@ -342,7 +374,6 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- 1. Chặn xóa mềm / xóa cứng nếu sinh viên đã có lịch sử thi trong BANGDIEM
     IF EXISTS (
         SELECT 1
         FROM deleted d
@@ -355,60 +386,103 @@ BEGIN
         ROLLBACK TRANSACTION;
         RETURN;
     END
-
-    -- 2. Đồng bộ trạng thái tài khoản khi DAXOA thay đổi (Soft Delete / Phục hồi)
-    IF UPDATE(DAXOA)
-    BEGIN
-        UPDATE tk
-        SET tk.TRANGTHAI = CASE WHEN i.DAXOA = 1 THEN 0 ELSE 1 END
-        FROM dbo.TAIKHOAN tk
-        INNER JOIN inserted i ON tk.MASV = i.MASV;
-    END
 END;
 GO
 
 /*==============================================================================
-  PHẦN 7: TẠO CÁC STORED PROCEDURE NGHIỆP VỤ (NGƯỜI 1)
+  PHẦN 7: TẠO CÁC STORED PROCEDURE NGHIỆP VỤ & QUẢN TRỊ SQL SERVER LOGIN
 ==============================================================================*/
 
--- 7.1. Stored Procedure Đăng nhập
-CREATE PROCEDURE dbo.sp_DangNhap
-    @TenDangNhap    NVARCHAR(50),
-    @MatKhauHash    NVARCHAR(100)
+-- 7.1. Stored Procedure lấy thông tin phiên đăng nhập từ SQL Server Login hiện tại
+CREATE PROCEDURE dbo.sp_LayThongTinDangNhapHienTai
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @UserTrim NVARCHAR(50) = LTRIM(RTRIM(@TenDangNhap));
+    DECLARE @LoginName NVARCHAR(128) = LTRIM(RTRIM(SUSER_SNAME()));
+    DECLARE @DbUserName NVARCHAR(128) = LTRIM(RTRIM(USER_NAME()));
+    DECLARE @IsRoleGV BIT = CASE WHEN IS_MEMBER(N'role_GiaoVien') = 1 THEN 1 ELSE 0 END;
+    DECLARE @IsRoleSV BIT = CASE WHEN IS_MEMBER(N'role_SinhVien') = 1 THEN 1 ELSE 0 END;
 
-    SELECT
-        tk.TENDANGNHAP,
-        tk.QUYEN,
-        tk.TRANGTHAI,
-        RTRIM(ISNULL(tk.MAGV, N'')) AS MAGV,
-        RTRIM(ISNULL(tk.MASV, N'')) AS MASV,
-        CASE
-            WHEN tk.QUYEN = N'GIANGVIEN' THEN (gv.HO + N' ' + gv.TEN)
-            WHEN tk.QUYEN = N'SINHVIEN'  THEN (sv.HO + N' ' + sv.TEN)
-            ELSE tk.TENDANGNHAP
-        END AS HOTEN,
-        RTRIM(ISNULL(sv.MALOP, N'')) AS MALOP,
-        ISNULL(l.TENLOP, N'') AS TENLOP,
-        ISNULL(sv.DAXOA, 0) AS SV_DAXOA,
-        CASE
-            WHEN tk.MATKHAU = @MatKhauHash THEN 1
-            ELSE 0
-        END AS KHOP_MATKHAU
-    FROM dbo.TAIKHOAN tk
-    LEFT JOIN dbo.GIAOVIEN gv ON tk.MAGV = gv.MAGV
-    LEFT JOIN dbo.SINHVIEN sv ON tk.MASV = sv.MASV
-    LEFT JOIN dbo.LOP l ON sv.MALOP = l.MALOP
-    WHERE tk.TENDANGNHAP = @UserTrim
-       OR (tk.QUYEN = N'SINHVIEN' AND RTRIM(tk.MASV) = UPPER(@UserTrim));
+    IF EXISTS (
+        SELECT 1 FROM sys.server_principals
+        WHERE name = @LoginName COLLATE DATABASE_DEFAULT
+          AND type = 'S'
+          AND is_disabled = 1
+    )
+    BEGIN
+        RAISERROR(N'Tài khoản SQL Server Login [%s] đã bị thu hồi (vô hiệu hóa)!', 16, 1, @LoginName);
+        RETURN;
+    END
+
+    IF @DbUserName IS NULL OR @DbUserName = N'guest'
+    BEGIN
+        RAISERROR(N'Tài khoản SQL Login [%s] chưa được ánh xạ với Database User trong TRAC_NGHIEM!', 16, 1, @LoginName);
+        RETURN;
+    END
+
+    IF @IsRoleGV = 1
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM dbo.GIAOVIEN WHERE RTRIM(MAGV) = UPPER(@LoginName))
+        BEGIN
+            RAISERROR(N'Tài khoản SQL Login [%s] thuộc role_GiaoVien nhưng không khớp với bất kỳ MAGV nào trong bảng GIAOVIEN!', 16, 1, @LoginName);
+            RETURN;
+        END
+
+        SELECT
+            RTRIM(gv.MAGV) AS TENDANGNHAP,
+            @DbUserName AS DB_USERNAME,
+            N'GIANGVIEN' AS QUYEN,
+            N'role_GiaoVien' AS ROLE_NAME,
+            CAST(1 AS BIT) AS TRANGTHAI,
+            RTRIM(gv.MAGV) AS MAGV,
+            N'' AS MASV,
+            (gv.HO + N' ' + gv.TEN) AS HOTEN,
+            N'' AS MALOP,
+            N'' AS TENLOP,
+            CAST(0 AS BIT) AS SV_DAXOA
+        FROM dbo.GIAOVIEN gv
+        WHERE RTRIM(gv.MAGV) = UPPER(@LoginName);
+        RETURN;
+    END
+
+    IF @IsRoleSV = 1
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = UPPER(@LoginName))
+        BEGIN
+            RAISERROR(N'Tài khoản SQL Login [%s] thuộc role_SinhVien nhưng không khớp với bất kỳ MASV nào trong bảng SINHVIEN!', 16, 1, @LoginName);
+            RETURN;
+        END
+
+        IF EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = UPPER(@LoginName) AND DAXOA = 1)
+        BEGIN
+            RAISERROR(N'Hồ sơ sinh viên [%s] hiện đã ngừng hoạt động, không được phép đăng nhập!', 16, 1, @LoginName);
+            RETURN;
+        END
+
+        SELECT
+            RTRIM(sv.MASV) AS TENDANGNHAP,
+            @DbUserName AS DB_USERNAME,
+            N'SINHVIEN' AS QUYEN,
+            N'role_SinhVien' AS ROLE_NAME,
+            CAST(1 AS BIT) AS TRANGTHAI,
+            N'' AS MAGV,
+            RTRIM(sv.MASV) AS MASV,
+            (sv.HO + N' ' + sv.TEN) AS HOTEN,
+            RTRIM(sv.MALOP) AS MALOP,
+            ISNULL(l.TENLOP, N'') AS TENLOP,
+            sv.DAXOA AS SV_DAXOA
+        FROM dbo.SINHVIEN sv
+        INNER JOIN dbo.LOP l ON sv.MALOP = l.MALOP
+        WHERE RTRIM(sv.MASV) = UPPER(@LoginName);
+        RETURN;
+    END
+
+    RAISERROR(N'Tài khoản SQL Login [%s] không được phân quyền trong role_GiaoVien hoặc role_SinhVien!', 16, 1, @LoginName);
 END;
 GO
 
--- 7.2. Stored Procedure Thêm Môn Học (Nếu môn học từng bị xóa mềm thì cho phép khôi phục hoặc báo rõ)
+-- 7.2. Stored Procedure Quản lý Môn Học
 CREATE PROCEDURE dbo.sp_ThemMonHoc
     @MaMH   NCHAR(5),
     @TenMH  NVARCHAR(40)
@@ -447,7 +521,6 @@ BEGIN
 END;
 GO
 
--- 7.3. Stored Procedure Cập Nhật Môn Học
 CREATE PROCEDURE dbo.sp_CapNhatMonHoc
     @MaMH   NCHAR(5),
     @TenMH  NVARCHAR(40)
@@ -475,7 +548,6 @@ BEGIN
 END;
 GO
 
--- 7.4. Stored Procedure Xóa Môn Học (Soft Delete có kiểm tra tham chiếu)
 CREATE PROCEDURE dbo.sp_XoaMonHoc
     @MaMH   NCHAR(5)
 AS
@@ -503,7 +575,6 @@ BEGIN
 END;
 GO
 
--- 7.5. Stored Procedure Phục Hồi Môn Học đã xóa mềm
 CREATE PROCEDURE dbo.sp_PhucHoiMonHoc
     @MaMH   NCHAR(5)
 AS
@@ -523,7 +594,7 @@ BEGIN
 END;
 GO
 
--- 7.6. Stored Procedure Quản lý Lớp (Thêm, Cập nhật, Xóa)
+-- 7.3. Stored Procedure Quản lý Lớp
 CREATE PROCEDURE dbo.sp_ThemLop
     @MaLop  NCHAR(8),
     @TenLop NVARCHAR(40)
@@ -596,7 +667,6 @@ BEGIN
         RETURN;
     END
 
-    -- Nếu có sinh viên đã xóa mềm thuộc lớp này mà chưa từng thi, dọn tài khoản và SV xóa mềm trước hoặc chặn xóa
     IF EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MALOP) = RTRIM(@MaLop))
     BEGIN
         RAISERROR(N'Không thể xóa lớp [%s] vì còn hồ sơ sinh viên (kể cả sinh viên chờ phục hồi) thuộc lớp này!', 16, 1, @MaLop);
@@ -607,7 +677,73 @@ BEGIN
 END;
 GO
 
--- 7.7. Stored Procedure Thêm Sinh Viên (Sử dụng TRANSACTION tự động cấp tài khoản Sinh viên)
+-- 7.4. Stored Procedure Quản lý Sinh Viên & Cấp SQL Login cho Sinh viên
+CREATE PROCEDURE dbo.sp_CapTaiKhoanSinhVien
+    @MaSV           NCHAR(8),
+    @MatKhauPlain   NVARCHAR(128)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF IS_MEMBER(N'role_GiaoVien') <> 1 AND IS_SRVROLEMEMBER(N'sysadmin') <> 1
+    BEGIN
+        RAISERROR(N'Từ chối truy cập: Chỉ quản trị / giáo viên mới được cấp SQL Login cho sinh viên!', 16, 1);
+        RETURN;
+    END
+
+    DECLARE @MaSVClean NVARCHAR(8) = UPPER(LTRIM(RTRIM(ISNULL(@MaSV, N''))));
+    IF LEN(@MaSVClean) = 0 OR LEN(@MaSVClean) > 8 OR @MaSVClean LIKE N'%[^A-Z0-9_-]%'
+    BEGIN
+        RAISERROR(N'Mã sinh viên (MASV) không hợp lệ!', 16, 1);
+        RETURN;
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = @MaSVClean AND DAXOA = 0)
+    BEGIN
+        RAISERROR(N'Sinh viên [%s] không tồn tại hoặc đã ngừng hoạt động!', 16, 1, @MaSVClean);
+        RETURN;
+    END
+
+    IF @MatKhauPlain IS NULL OR LEN(@MatKhauPlain) < 6
+    BEGIN
+        RAISERROR(N'Mật khẩu sinh viên phải từ 6 ký tự trở lên!', 16, 1);
+        RETURN;
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = @MaSVClean COLLATE DATABASE_DEFAULT)
+    BEGIN
+        DECLARE @SqlLogin NVARCHAR(MAX) = N'CREATE LOGIN ' + QUOTENAME(@MaSVClean)
+            + N' WITH PASSWORD = ' + QUOTENAME(@MatKhauPlain, '''')
+            + N', DEFAULT_DATABASE = [TRAC_NGHIEM], CHECK_POLICY = ON, CHECK_EXPIRATION = OFF;';
+        EXEC sys.sp_executesql @SqlLogin;
+    END
+    ELSE
+    BEGIN
+        DECLARE @SqlEnable NVARCHAR(MAX) = N'ALTER LOGIN ' + QUOTENAME(@MaSVClean) + N' ENABLE;';
+        EXEC sys.sp_executesql @SqlEnable;
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = @MaSVClean COLLATE DATABASE_DEFAULT AND type = 'S')
+    BEGIN
+        DECLARE @SqlUser NVARCHAR(MAX) = N'CREATE USER ' + QUOTENAME(@MaSVClean) + N' FOR LOGIN ' + QUOTENAME(@MaSVClean) + N';';
+        EXEC sys.sp_executesql @SqlUser;
+    END
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM sys.database_role_members drm
+        INNER JOIN sys.database_principals r ON drm.role_principal_id = r.principal_id
+        INNER JOIN sys.database_principals u ON drm.member_principal_id = u.principal_id
+        WHERE r.name = N'role_SinhVien'
+          AND u.name = @MaSVClean COLLATE DATABASE_DEFAULT
+    )
+    BEGIN
+        DECLARE @SqlRole NVARCHAR(MAX) = N'ALTER ROLE [role_SinhVien] ADD MEMBER ' + QUOTENAME(@MaSVClean) + N';';
+        EXEC sys.sp_executesql @SqlRole;
+    END
+END;
+GO
+
 CREATE PROCEDURE dbo.sp_ThemSinhVien
     @MaSV           NCHAR(8),
     @Ho             NVARCHAR(40),
@@ -615,7 +751,7 @@ CREATE PROCEDURE dbo.sp_ThemSinhVien
     @NgaySinh       DATETIME = NULL,
     @DiaChi         NVARCHAR(40) = NULL,
     @MaLop          NCHAR(8),
-    @MatKhauMacDinh NVARCHAR(100) -- Chuỗi SHA-256 của mật khẩu mặc định (123456)
+    @MatKhauMacDinh NVARCHAR(100) = N'123456'
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -624,51 +760,61 @@ BEGIN
     SET @Ten = LTRIM(RTRIM(@Ten));
     SET @MaLop = UPPER(LTRIM(RTRIM(@MaLop)));
 
+    DECLARE @MaSVClean NVARCHAR(8) = RTRIM(@MaSV);
+    IF LEN(@MaSVClean) = 0 OR @MaSVClean LIKE N'%[^A-Z0-9_-]%'
+    BEGIN
+        RAISERROR(N'Mã sinh viên [%s] không hợp lệ!', 16, 1, @MaSVClean);
+        RETURN;
+    END
+
     IF NOT EXISTS (SELECT 1 FROM dbo.LOP WHERE RTRIM(MALOP) = RTRIM(@MaLop))
     BEGIN
         RAISERROR(N'Lớp [%s] không tồn tại!', 16, 1, @MaLop);
         RETURN;
     END
 
-    IF EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = RTRIM(@MaSV) AND DAXOA = 0)
+    IF EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = @MaSVClean AND DAXOA = 0)
     BEGIN
-        RAISERROR(N'Mã sinh viên [%s] đã tồn tại!', 16, 1, @MaSV);
+        RAISERROR(N'Mã sinh viên [%s] đã tồn tại!', 16, 1, @MaSVClean);
         RETURN;
     END
 
-    IF EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = RTRIM(@MaSV) AND DAXOA = 1)
+    IF EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = @MaSVClean AND DAXOA = 1)
     BEGIN
-        RAISERROR(N'Mã sinh viên [%s] đang nằm trong danh sách đã xóa tạm. Vui lòng sử dụng chức năng Phục hồi!', 16, 1, @MaSV);
+        RAISERROR(N'Mã sinh viên [%s] đang nằm trong danh sách đã xóa tạm. Vui lòng sử dụng chức năng Phục hồi!', 16, 1, @MaSVClean);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM dbo.GIAOVIEN WHERE RTRIM(MAGV) = @MaSVClean)
+    BEGIN
+        RAISERROR(N'Mã [%s] trùng với mã giáo viên trong hệ thống!', 16, 1, @MaSVClean);
         RETURN;
     END
 
     BEGIN TRY
-        BEGIN TRANSACTION;
-
-        -- Bước 1: Thêm hồ sơ sinh viên vào bảng SINHVIEN
         INSERT INTO dbo.SINHVIEN (MASV, HO, TEN, NGAYSINH, DIACHI, MALOP, DAXOA)
         VALUES (@MaSV, @Ho, @Ten, @NgaySinh, @DiaChi, @MaLop, 0);
 
-        -- Bước 2: Tự động khởi tạo tài khoản đăng nhập cho sinh viên (Login Name = MASV)
-        IF NOT EXISTS (SELECT 1 FROM dbo.TAIKHOAN WHERE TENDANGNHAP = RTRIM(@MaSV))
-        BEGIN
-            INSERT INTO dbo.TAIKHOAN (TENDANGNHAP, MATKHAU, MAGV, MASV, QUYEN, TRANGTHAI)
-            VALUES (RTRIM(@MaSV), @MatKhauMacDinh, NULL, @MaSV, N'SINHVIEN', 1);
-        END
+        DECLARE @PwdPlain NVARCHAR(128) = CASE
+            WHEN @MatKhauMacDinh IS NULL OR LEN(LTRIM(RTRIM(@MatKhauMacDinh))) < 6 OR LEN(@MatKhauMacDinh) = 64
+            THEN N'123456'
+            ELSE LTRIM(RTRIM(@MatKhauMacDinh))
+        END;
 
-        COMMIT TRANSACTION;
+        EXEC dbo.sp_CapTaiKhoanSinhVien @MaSV = @MaSV, @MatKhauPlain = @PwdPlain;
     END TRY
     BEGIN CATCH
-        IF @@TRANCOUNT > 0
-            ROLLBACK TRANSACTION;
-
         DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();
+        IF EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = @MaSVClean)
+           AND NOT EXISTS (SELECT 1 FROM dbo.BANGDIEM WHERE RTRIM(MASV) = @MaSVClean)
+        BEGIN
+            DELETE FROM dbo.SINHVIEN WHERE RTRIM(MASV) = @MaSVClean;
+        END
         RAISERROR(@ErrMsg, 16, 1);
     END CATCH
 END;
 GO
 
--- 7.8. Stored Procedure Cập Nhật Sinh Viên
 CREATE PROCEDURE dbo.sp_CapNhatSinhVien
     @MaSV       NCHAR(8),
     @Ho         NVARCHAR(40),
@@ -706,79 +852,104 @@ BEGIN
 END;
 GO
 
--- 7.9. Stored Procedure Xóa Sinh Viên (Soft Delete + Khóa Tài Khoản qua Trigger/Transaction)
 CREATE PROCEDURE dbo.sp_XoaSinhVien
     @MaSV   NCHAR(8)
 AS
 BEGIN
     SET NOCOUNT ON;
-    SET @MaSV = UPPER(LTRIM(RTRIM(@MaSV)));
+    DECLARE @MaSVClean NVARCHAR(8) = UPPER(LTRIM(RTRIM(ISNULL(@MaSV, N''))));
 
-    IF NOT EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = RTRIM(@MaSV) AND DAXOA = 0)
+    IF LEN(@MaSVClean) = 0 OR @MaSVClean LIKE N'%[^A-Z0-9_-]%'
     BEGIN
-        RAISERROR(N'Sinh viên [%s] không tồn tại hoặc đã bị xóa!', 16, 1, @MaSV);
+        RAISERROR(N'Mã sinh viên không hợp lệ!', 16, 1);
         RETURN;
     END
 
-    IF EXISTS (SELECT 1 FROM dbo.BANGDIEM WHERE RTRIM(MASV) = RTRIM(@MaSV))
+    IF NOT EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = @MaSVClean AND DAXOA = 0)
     BEGIN
-        RAISERROR(N'Không thể xóa sinh viên [%s] vì sinh viên đã có kết quả điểm thi!', 16, 1, @MaSV);
+        RAISERROR(N'Sinh viên [%s] không tồn tại hoặc đã bị xóa!', 16, 1, @MaSVClean);
         RETURN;
     END
 
-    BEGIN TRY
-        BEGIN TRANSACTION;
+    IF EXISTS (SELECT 1 FROM dbo.BANGDIEM WHERE RTRIM(MASV) = @MaSVClean)
+    BEGIN
+        RAISERROR(N'Không thể xóa sinh viên [%s] vì sinh viên đã có kết quả điểm thi!', 16, 1, @MaSVClean);
+        RETURN;
+    END
 
-        UPDATE dbo.SINHVIEN
-        SET DAXOA = 1
-        WHERE RTRIM(MASV) = RTRIM(@MaSV);
+    UPDATE dbo.SINHVIEN
+    SET DAXOA = 1
+    WHERE RTRIM(MASV) = @MaSVClean;
 
-        COMMIT TRANSACTION;
-    END TRY
-    BEGIN CATCH
-        IF @@TRANCOUNT > 0
-            ROLLBACK TRANSACTION;
-
-        DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();
-        RAISERROR(@ErrMsg, 16, 1);
-    END CATCH
+    IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = @MaSVClean COLLATE DATABASE_DEFAULT AND type = 'S' AND is_disabled = 0)
+    BEGIN
+        DECLARE @SqlDisableSV NVARCHAR(MAX) = N'ALTER LOGIN ' + QUOTENAME(@MaSVClean) + N' DISABLE;';
+        EXEC sys.sp_executesql @SqlDisableSV;
+    END
 END;
 GO
 
--- 7.10. Stored Procedure Phục Hồi Sinh Viên
 CREATE PROCEDURE dbo.sp_PhucHoiSinhVien
     @MaSV   NCHAR(8)
 AS
 BEGIN
     SET NOCOUNT ON;
-    SET @MaSV = UPPER(LTRIM(RTRIM(@MaSV)));
+    DECLARE @MaSVClean NVARCHAR(8) = UPPER(LTRIM(RTRIM(ISNULL(@MaSV, N''))));
 
-    IF NOT EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = RTRIM(@MaSV) AND DAXOA = 1)
+    IF LEN(@MaSVClean) = 0 OR @MaSVClean LIKE N'%[^A-Z0-9_-]%'
     BEGIN
-        RAISERROR(N'Không tìm thấy sinh viên [%s] trong danh sách chờ phục hồi!', 16, 1, @MaSV);
+        RAISERROR(N'Mã sinh viên không hợp lệ!', 16, 1);
         RETURN;
     END
 
-    BEGIN TRY
-        BEGIN TRANSACTION;
+    IF NOT EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = @MaSVClean AND DAXOA = 1)
+    BEGIN
+        RAISERROR(N'Không tìm thấy sinh viên [%s] trong danh sách chờ phục hồi!', 16, 1, @MaSVClean);
+        RETURN;
+    END
 
-        UPDATE dbo.SINHVIEN
-        SET DAXOA = 0
-        WHERE RTRIM(MASV) = RTRIM(@MaSV);
+    UPDATE dbo.SINHVIEN
+    SET DAXOA = 0
+    WHERE RTRIM(MASV) = @MaSVClean;
 
-        COMMIT TRANSACTION;
-    END TRY
-    BEGIN CATCH
-        IF @@TRANCOUNT > 0
-            ROLLBACK TRANSACTION;
-
-        DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();
-        RAISERROR(@ErrMsg, 16, 1);
-    END CATCH
+    IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = @MaSVClean COLLATE DATABASE_DEFAULT AND type = 'S' AND is_disabled = 1)
+    BEGIN
+        DECLARE @SqlEnableSV NVARCHAR(MAX) = N'ALTER LOGIN ' + QUOTENAME(@MaSVClean) + N' ENABLE;';
+        EXEC sys.sp_executesql @SqlEnableSV;
+    END
 END;
 GO
 
--- 7.11. Stored Procedure Quản lý Giáo Viên (Thêm, Cập nhật, Xóa)
+CREATE PROCEDURE dbo.sp_HoanTacThemSinhVien
+    @MaSV   NCHAR(8)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @MaSVClean NVARCHAR(8) = UPPER(LTRIM(RTRIM(ISNULL(@MaSV, N''))));
+
+    IF LEN(@MaSVClean) = 0 OR @MaSVClean LIKE N'%[^A-Z0-9_-]%'
+        RETURN;
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.BANGDIEM WHERE RTRIM(MASV) = @MaSVClean)
+    BEGIN
+        IF EXISTS (SELECT 1 FROM sys.database_principals WHERE name = @MaSVClean COLLATE DATABASE_DEFAULT AND type = 'S')
+        BEGIN
+            DECLARE @SqlDropUser NVARCHAR(MAX) = N'DROP USER ' + QUOTENAME(@MaSVClean) + N';';
+            BEGIN TRY EXEC sys.sp_executesql @SqlDropUser; END TRY BEGIN CATCH END CATCH
+        END
+
+        IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = @MaSVClean COLLATE DATABASE_DEFAULT AND type = 'S')
+        BEGIN
+            DECLARE @SqlDropLogin NVARCHAR(MAX) = N'DROP LOGIN ' + QUOTENAME(@MaSVClean) + N';';
+            BEGIN TRY EXEC sys.sp_executesql @SqlDropLogin; END TRY BEGIN CATCH END CATCH
+        END
+
+        DELETE FROM dbo.SINHVIEN WHERE RTRIM(MASV) = @MaSVClean;
+    END
+END;
+GO
+
+-- 7.5. Stored Procedure Quản lý Giáo Viên
 CREATE PROCEDURE dbo.sp_ThemGiaoVien
     @MaGV   NCHAR(8),
     @Ho     NVARCHAR(40),
@@ -836,183 +1007,825 @@ CREATE PROCEDURE dbo.sp_XoaGiaoVien
 AS
 BEGIN
     SET NOCOUNT ON;
-    SET @MaGV = UPPER(LTRIM(RTRIM(@MaGV)));
+    DECLARE @MaGVClean NVARCHAR(8) = UPPER(LTRIM(RTRIM(ISNULL(@MaGV, N''))));
 
-    IF EXISTS (SELECT 1 FROM dbo.BODE WHERE RTRIM(MAGV) = RTRIM(@MaGV))
+    IF LEN(@MaGVClean) = 0 OR @MaGVClean LIKE N'%[^A-Z0-9_-]%'
     BEGIN
-        RAISERROR(N'Không thể xóa giáo viên [%s] vì giáo viên đã biên soạn câu hỏi trong Bộ đề!', 16, 1, @MaGV);
+        RAISERROR(N'Mã giáo viên không hợp lệ!', 16, 1);
         RETURN;
     END
 
-    IF EXISTS (SELECT 1 FROM dbo.GIAOVIEN_DANGKY WHERE RTRIM(MAGV) = RTRIM(@MaGV))
+    IF NOT EXISTS (SELECT 1 FROM dbo.GIAOVIEN WHERE RTRIM(MAGV) = @MaGVClean)
     BEGIN
-        RAISERROR(N'Không thể xóa giáo viên [%s] vì giáo viên đã có lịch đăng ký thi!', 16, 1, @MaGV);
+        RAISERROR(N'Không tìm thấy mã giáo viên [%s]!', 16, 1, @MaGVClean);
         RETURN;
     END
 
-    IF EXISTS (SELECT 1 FROM dbo.TAIKHOAN WHERE RTRIM(MAGV) = RTRIM(@MaGV))
+    IF EXISTS (SELECT 1 FROM dbo.BODE WHERE RTRIM(MAGV) = @MaGVClean)
     BEGIN
-        RAISERROR(N'Không thể xóa giáo viên [%s] vì giáo viên đang có tài khoản đăng nhập liên kết!', 16, 1, @MaGV);
+        RAISERROR(N'Không thể xóa giáo viên [%s] vì giáo viên đã biên soạn câu hỏi trong Bộ đề!', 16, 1, @MaGVClean);
         RETURN;
     END
 
-    DELETE FROM dbo.GIAOVIEN WHERE RTRIM(MAGV) = RTRIM(@MaGV);
+    IF EXISTS (SELECT 1 FROM dbo.GIAOVIEN_DANGKY WHERE RTRIM(MAGV) = @MaGVClean)
+    BEGIN
+        RAISERROR(N'Không thể xóa giáo viên [%s] vì giáo viên đã có lịch đăng ký thi!', 16, 1, @MaGVClean);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = @MaGVClean COLLATE DATABASE_DEFAULT AND type = 'S' AND is_disabled = 0)
+    BEGIN
+        RAISERROR(N'Không thể xóa giáo viên [%s] vì giáo viên đang có tài khoản SQL Server Login đang hoạt động! Vui lòng thu hồi tài khoản trước.', 16, 1, @MaGVClean);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM sys.database_principals WHERE name = @MaGVClean COLLATE DATABASE_DEFAULT AND type = 'S')
+    BEGIN
+        DECLARE @SqlDropUser NVARCHAR(MAX) = N'DROP USER ' + QUOTENAME(@MaGVClean) + N';';
+        EXEC sys.sp_executesql @SqlDropUser;
+    END
+
+    IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = @MaGVClean COLLATE DATABASE_DEFAULT AND type = 'S' AND is_disabled = 1)
+    BEGIN
+        DECLARE @SqlDropLogin NVARCHAR(MAX) = N'DROP LOGIN ' + QUOTENAME(@MaGVClean) + N';';
+        EXEC sys.sp_executesql @SqlDropLogin;
+    END
+
+    DELETE FROM dbo.GIAOVIEN WHERE RTRIM(MAGV) = @MaGVClean;
 END;
 GO
 
--- 7.12. Stored Procedure Tạo Tài Khoản Giảng Viên (Transaction + Kiểm tra quyền & 1 GV - 1 TK)
-CREATE PROCEDURE dbo.sp_TaoTaiKhoanGiaoVien
-    @NguoiThucHien  NVARCHAR(50),
-    @MaGV           NCHAR(8),
-    @TenDangNhap    NVARCHAR(50),
-    @MatKhauHash    NVARCHAR(100),
-    @TrangThai      BIT = 1
+CREATE PROCEDURE dbo.sp_LayDanhSachGiaoVien
 AS
 BEGIN
     SET NOCOUNT ON;
-    SET @MaGV = UPPER(LTRIM(RTRIM(@MaGV)));
-    SET @TenDangNhap = LTRIM(RTRIM(@TenDangNhap));
 
-    -- 1. Kiểm tra người thực hiện có phải là GIANGVIEN đang hoạt động không
-    IF NOT EXISTS (
-        SELECT 1 FROM dbo.TAIKHOAN
-        WHERE TENDANGNHAP = LTRIM(RTRIM(@NguoiThucHien))
-          AND QUYEN = N'GIANGVIEN'
-          AND TRANGTHAI = 1
-    )
+    SELECT
+        MAGV,
+        HO,
+        TEN,
+        HOTEN,
+        SODTLL,
+        DIACHI,
+        ISNULL(TENDANGNHAP, N'(Chưa tạo)') AS TENDANGNHAP,
+        TRANGTHAI_MOTA,
+        CO_TAI_KHOAN,
+        TRANGTHAI_TK,
+        SO_CAU_DA_SOAN,
+        SO_LICH_DANG_KY
+    FROM dbo.vw_DanhSachGiaoVien
+    ORDER BY MAGV ASC;
+END;
+GO
+
+CREATE PROCEDURE dbo.sp_TimKiemGiaoVien
+    @Keyword NVARCHAR(60)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @KeyPattern NVARCHAR(65) = N'%' + LTRIM(RTRIM(ISNULL(@Keyword, N''))) + N'%';
+
+    SELECT
+        MAGV,
+        HO,
+        TEN,
+        HOTEN,
+        SODTLL,
+        DIACHI,
+        ISNULL(TENDANGNHAP, N'(Chưa tạo)') AS TENDANGNHAP,
+        TRANGTHAI_MOTA,
+        CO_TAI_KHOAN,
+        TRANGTHAI_TK,
+        SO_CAU_DA_SOAN,
+        SO_LICH_DANG_KY
+    FROM dbo.vw_DanhSachGiaoVien
+    WHERE MAGV LIKE @KeyPattern
+       OR HO LIKE @KeyPattern
+       OR TEN LIKE @KeyPattern
+       OR HOTEN LIKE @KeyPattern
+       OR SODTLL LIKE @KeyPattern
+    ORDER BY MAGV ASC;
+END;
+GO
+
+-- 7.6. Stored Procedure Tạo / Thu Hồi / Kích Hoạt Lại SQL Server Login cho Giáo Viên
+CREATE PROCEDURE dbo.sp_TaoTaiKhoanGiaoVien
+    @MaGV           NCHAR(8),
+    @TenDangNhap    NVARCHAR(50),
+    @MatKhauPlain   NVARCHAR(128)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF IS_MEMBER(N'role_GiaoVien') <> 1 AND IS_SRVROLEMEMBER(N'sysadmin') <> 1
     BEGIN
-        RAISERROR(N'Truy cập bị từ chối: Chỉ giảng viên đang hoạt động mới có quyền tạo tài khoản!', 16, 1);
+        RAISERROR(N'Truy cập bị từ chối: Chỉ giáo viên thuộc role_GiaoVien mới có quyền tạo tài khoản giáo viên!', 16, 1);
         RETURN;
     END
 
-    -- 2. Kiểm tra giảng viên có tồn tại trong bảng GIAOVIEN không
-    IF NOT EXISTS (SELECT 1 FROM dbo.GIAOVIEN WHERE RTRIM(MAGV) = RTRIM(@MaGV))
+    DECLARE @MaGVClean NVARCHAR(8) = UPPER(LTRIM(RTRIM(ISNULL(@MaGV, N''))));
+    DECLARE @LoginName NVARCHAR(50) = UPPER(LTRIM(RTRIM(ISNULL(@TenDangNhap, N''))));
+
+    IF LEN(@MaGVClean) = 0 OR LEN(@MaGVClean) > 8 OR @MaGVClean LIKE N'%[^A-Z0-9_-]%'
     BEGIN
-        RAISERROR(N'Mã giảng viên [%s] không tồn tại trong hệ thống!', 16, 1, @MaGV);
+        RAISERROR(N'Mã giáo viên (MAGV) không hợp lệ!', 16, 1);
         RETURN;
     END
 
-    -- 3. Kiểm tra mỗi giảng viên chỉ có duy nhất 1 tài khoản
-    IF EXISTS (SELECT 1 FROM dbo.TAIKHOAN WHERE RTRIM(MAGV) = RTRIM(@MaGV))
+    IF @LoginName <> @MaGVClean
     BEGIN
-        RAISERROR(N'Giảng viên [%s] đã được cấp tài khoản trước đó. Mỗi giảng viên chỉ có một tài khoản!', 16, 1, @MaGV);
+        RAISERROR(N'Theo quy định bảo mật, Tên đăng nhập (SQL Login) của giáo viên bắt buộc phải trùng khớp với Mã giáo viên [%s]!', 16, 1, @MaGVClean);
         RETURN;
     END
 
-    -- 4. Kiểm tra trùng tên đăng nhập (hoặc trùng với mã sinh viên)
-    IF EXISTS (SELECT 1 FROM dbo.TAIKHOAN WHERE TENDANGNHAP = @TenDangNhap)
-       OR EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = UPPER(@TenDangNhap))
+    IF @MatKhauPlain IS NULL OR LEN(@MatKhauPlain) < 6 OR LEN(@MatKhauPlain) > 128
     BEGIN
-        RAISERROR(N'Tên đăng nhập [%s] đã tồn tại hoặc trùng với mã sinh viên!', 16, 1, @TenDangNhap);
+        RAISERROR(N'Mật khẩu phải có độ dài từ 6 đến 128 ký tự!', 16, 1);
         RETURN;
     END
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.GIAOVIEN WHERE RTRIM(MAGV) = @MaGVClean)
+    BEGIN
+        RAISERROR(N'Mã giáo viên [%s] không tồn tại trong bảng GIAOVIEN!', 16, 1, @MaGVClean);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM dbo.SINHVIEN WHERE RTRIM(MASV) = @LoginName)
+    BEGIN
+        RAISERROR(N'Mã [%s] đang trùng với mã sinh viên trong hệ thống!', 16, 1, @LoginName);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = @LoginName COLLATE DATABASE_DEFAULT)
+    BEGIN
+        RAISERROR(N'SQL Server Login [%s] đã tồn tại! Mỗi giáo viên chỉ có một tài khoản duy nhất.', 16, 1, @LoginName);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM sys.database_principals WHERE name = @LoginName COLLATE DATABASE_DEFAULT)
+    BEGIN
+        RAISERROR(N'Database User [%s] đã tồn tại trong cơ sở dữ liệu TRAC_NGHIEM!', 16, 1, @LoginName);
+        RETURN;
+    END
+
+    DECLARE @LoginCreated BIT = 0;
+    DECLARE @UserCreated BIT = 0;
+    DECLARE @SqlCreateLogin NVARCHAR(MAX);
+    DECLARE @SqlCreateUser NVARCHAR(MAX);
+    DECLARE @SqlAddRole NVARCHAR(MAX);
 
     BEGIN TRY
-        BEGIN TRANSACTION;
+        SET @SqlCreateLogin = N'CREATE LOGIN ' + QUOTENAME(@LoginName)
+            + N' WITH PASSWORD = ' + QUOTENAME(@MatKhauPlain, '''')
+            + N', DEFAULT_DATABASE = [TRAC_NGHIEM], CHECK_POLICY = ON, CHECK_EXPIRATION = OFF;';
+        EXEC sys.sp_executesql @SqlCreateLogin;
+        SET @LoginCreated = 1;
 
-        INSERT INTO dbo.TAIKHOAN (TENDANGNHAP, MATKHAU, MAGV, MASV, QUYEN, TRANGTHAI)
-        VALUES (@TenDangNhap, @MatKhauHash, @MaGV, NULL, N'GIANGVIEN', @TrangThai);
+        SET @SqlCreateUser = N'CREATE USER ' + QUOTENAME(@LoginName)
+            + N' FOR LOGIN ' + QUOTENAME(@LoginName) + N';';
+        EXEC sys.sp_executesql @SqlCreateUser;
+        SET @UserCreated = 1;
 
-        COMMIT TRANSACTION;
+        SET @SqlAddRole = N'ALTER ROLE [role_GiaoVien] ADD MEMBER ' + QUOTENAME(@LoginName) + N';';
+        EXEC sys.sp_executesql @SqlAddRole;
     END TRY
     BEGIN CATCH
-        IF @@TRANCOUNT > 0
-            ROLLBACK TRANSACTION;
-
         DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();
-        RAISERROR(@ErrMsg, 16, 1);
+
+        IF @UserCreated = 1 AND EXISTS (SELECT 1 FROM sys.database_principals WHERE name = @LoginName COLLATE DATABASE_DEFAULT)
+        BEGIN
+            DECLARE @SqlDropUser NVARCHAR(MAX) = N'DROP USER ' + QUOTENAME(@LoginName) + N';';
+            BEGIN TRY EXEC sys.sp_executesql @SqlDropUser; END TRY BEGIN CATCH END CATCH
+        END
+
+        IF @LoginCreated = 1 AND EXISTS (SELECT 1 FROM sys.server_principals WHERE name = @LoginName COLLATE DATABASE_DEFAULT)
+        BEGIN
+            DECLARE @SqlDropLogin NVARCHAR(MAX) = N'DROP LOGIN ' + QUOTENAME(@LoginName) + N';';
+            BEGIN TRY EXEC sys.sp_executesql @SqlDropLogin; END TRY BEGIN CATCH END CATCH
+        END
+
+        RAISERROR(N'Không thể tạo tài khoản SQL Login [%s]: %s', 16, 1, @LoginName, @ErrMsg);
     END CATCH
 END;
 GO
 
--- 7.13. Stored Procedure Đổi Mật Khẩu (Chỉ dành cho giảng viên đã có tài khoản)
-CREATE PROCEDURE dbo.sp_DoiMatKhau
-    @TenDangNhap        NVARCHAR(50),
-    @MatKhauHienTaiHash NVARCHAR(100),
-    @MatKhauMoiHash     NVARCHAR(100)
+CREATE PROCEDURE dbo.sp_ThuHoiTaiKhoanGiaoVien
+    @MaGV   NCHAR(8)
 AS
 BEGIN
     SET NOCOUNT ON;
-    SET @TenDangNhap = LTRIM(RTRIM(@TenDangNhap));
 
-    DECLARE @CurrentHash NVARCHAR(100);
-    DECLARE @Quyen NVARCHAR(20);
-    DECLARE @TrangThai BIT;
-
-    SELECT
-        @CurrentHash = MATKHAU,
-        @Quyen = QUYEN,
-        @TrangThai = TRANGTHAI
-    FROM dbo.TAIKHOAN
-    WHERE TENDANGNHAP = @TenDangNhap;
-
-    IF @CurrentHash IS NULL
+    IF IS_MEMBER(N'role_GiaoVien') <> 1 AND IS_SRVROLEMEMBER(N'sysadmin') <> 1
     BEGIN
-        RAISERROR(N'Tài khoản không tồn tại!', 16, 1);
+        RAISERROR(N'Truy cập bị từ chối: Chỉ giáo viên thuộc role_GiaoVien mới có quyền thu hồi tài khoản!', 16, 1);
         RETURN;
     END
 
-    IF @Quyen <> N'GIANGVIEN'
+    DECLARE @MaGVClean NVARCHAR(8) = UPPER(LTRIM(RTRIM(ISNULL(@MaGV, N''))));
+
+    IF LEN(@MaGVClean) = 0 OR LEN(@MaGVClean) > 8 OR @MaGVClean LIKE N'%[^A-Z0-9_-]%'
     BEGIN
-        RAISERROR(N'Theo quy định hệ thống, chức năng đổi mật khẩu chỉ dành cho giảng viên!', 16, 1);
+        RAISERROR(N'Mã giáo viên (MAGV) không hợp lệ!', 16, 1);
         RETURN;
     END
 
-    IF @TrangThai = 0
+    IF UPPER(LTRIM(RTRIM(SUSER_SNAME()))) = @MaGVClean
     BEGIN
-        RAISERROR(N'Tài khoản đang bị khóa, không thể đổi mật khẩu!', 16, 1);
+        RAISERROR(N'Không thể tự thu hồi (vô hiệu hóa) tài khoản đang đăng nhập của chính bạn!', 16, 1);
         RETURN;
     END
 
-    IF @CurrentHash <> @MatKhauHienTaiHash
+    IF NOT EXISTS (SELECT 1 FROM dbo.GIAOVIEN WHERE RTRIM(MAGV) = @MaGVClean)
     BEGIN
-        RAISERROR(N'Mật khẩu hiện tại không chính xác!', 16, 1);
+        RAISERROR(N'Mã giáo viên [%s] không tồn tại trong bảng GIAOVIEN!', 16, 1, @MaGVClean);
         RETURN;
     END
 
-    IF @CurrentHash = @MatKhauMoiHash
+    DECLARE @IsDisabled BIT;
+    SELECT @IsDisabled = is_disabled
+    FROM sys.server_principals
+    WHERE name = @MaGVClean COLLATE DATABASE_DEFAULT
+      AND type = 'S';
+
+    IF @IsDisabled IS NULL
+    BEGIN
+        RAISERROR(N'Giáo viên [%s] chưa có SQL Server Login trên hệ thống để thu hồi!', 16, 1, @MaGVClean);
+        RETURN;
+    END
+
+    IF @IsDisabled = 1
+    BEGIN
+        RAISERROR(N'Tài khoản SQL Login [%s] đã bị vô hiệu hóa trước đó!', 16, 1, @MaGVClean);
+        RETURN;
+    END
+
+    BEGIN TRY
+        DECLARE @SqlDisable NVARCHAR(MAX) = N'ALTER LOGIN ' + QUOTENAME(@MaGVClean) + N' DISABLE;';
+        EXEC sys.sp_executesql @SqlDisable;
+
+        DECLARE @Spid INT;
+        DECLARE curSessions CURSOR LOCAL FAST_FORWARD FOR
+            SELECT session_id
+            FROM sys.dm_exec_sessions
+            WHERE login_name = @MaGVClean COLLATE DATABASE_DEFAULT
+              AND session_id <> @@SPID;
+
+        OPEN curSessions;
+        FETCH NEXT FROM curSessions INTO @Spid;
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            DECLARE @SqlKill NVARCHAR(100) = N'KILL ' + CAST(@Spid AS NVARCHAR(20)) + N';';
+            BEGIN TRY
+                EXEC sys.sp_executesql @SqlKill;
+            END TRY
+            BEGIN CATCH
+            END CATCH
+            FETCH NEXT FROM curSessions INTO @Spid;
+        END
+        CLOSE curSessions;
+        DEALLOCATE curSessions;
+    END TRY
+    BEGIN CATCH
+        DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();
+        RAISERROR(N'Lỗi khi thu hồi SQL Login [%s]: %s', 16, 1, @MaGVClean, @ErrMsg);
+    END CATCH
+END;
+GO
+
+CREATE PROCEDURE dbo.sp_KichHoatLaiTaiKhoanGiaoVien
+    @MaGV   NCHAR(8)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF IS_MEMBER(N'role_GiaoVien') <> 1 AND IS_SRVROLEMEMBER(N'sysadmin') <> 1
+    BEGIN
+        RAISERROR(N'Truy cập bị từ chối: Chỉ giáo viên thuộc role_GiaoVien mới có quyền kích hoạt lại tài khoản!', 16, 1);
+        RETURN;
+    END
+
+    DECLARE @MaGVClean NVARCHAR(8) = UPPER(LTRIM(RTRIM(ISNULL(@MaGV, N''))));
+
+    IF LEN(@MaGVClean) = 0 OR LEN(@MaGVClean) > 8 OR @MaGVClean LIKE N'%[^A-Z0-9_-]%'
+    BEGIN
+        RAISERROR(N'Mã giáo viên (MAGV) không hợp lệ!', 16, 1);
+        RETURN;
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.GIAOVIEN WHERE RTRIM(MAGV) = @MaGVClean)
+    BEGIN
+        RAISERROR(N'Mã giáo viên [%s] không tồn tại trong bảng GIAOVIEN!', 16, 1, @MaGVClean);
+        RETURN;
+    END
+
+    DECLARE @IsDisabled BIT;
+    SELECT @IsDisabled = is_disabled
+    FROM sys.server_principals
+    WHERE name = @MaGVClean COLLATE DATABASE_DEFAULT
+      AND type = 'S';
+
+    IF @IsDisabled IS NULL
+    BEGIN
+        RAISERROR(N'Giáo viên [%s] chưa có SQL Server Login để kích hoạt lại!', 16, 1, @MaGVClean);
+        RETURN;
+    END
+
+    IF @IsDisabled = 0
+    BEGIN
+        RAISERROR(N'Tài khoản SQL Login [%s] hiện đang ở trạng thái hoạt động!', 16, 1, @MaGVClean);
+        RETURN;
+    END
+
+    BEGIN TRY
+        DECLARE @SqlEnable NVARCHAR(MAX) = N'ALTER LOGIN ' + QUOTENAME(@MaGVClean) + N' ENABLE;';
+        EXEC sys.sp_executesql @SqlEnable;
+
+        IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = @MaGVClean COLLATE DATABASE_DEFAULT AND type = 'S')
+        BEGIN
+            DECLARE @SqlCreateUser NVARCHAR(MAX) = N'CREATE USER ' + QUOTENAME(@MaGVClean) + N' FOR LOGIN ' + QUOTENAME(@MaGVClean) + N';';
+            EXEC sys.sp_executesql @SqlCreateUser;
+        END
+
+        IF NOT EXISTS (
+            SELECT 1
+            FROM sys.database_role_members drm
+            INNER JOIN sys.database_principals r ON drm.role_principal_id = r.principal_id
+            INNER JOIN sys.database_principals u ON drm.member_principal_id = u.principal_id
+            WHERE r.name = N'role_GiaoVien'
+              AND u.name = @MaGVClean COLLATE DATABASE_DEFAULT
+        )
+        BEGIN
+            DECLARE @SqlEnsureRole NVARCHAR(MAX) = N'ALTER ROLE [role_GiaoVien] ADD MEMBER ' + QUOTENAME(@MaGVClean) + N';';
+            EXEC sys.sp_executesql @SqlEnsureRole;
+        END
+    END TRY
+    BEGIN CATCH
+        DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();
+        RAISERROR(N'Lỗi khi kích hoạt lại SQL Login [%s]: %s', 16, 1, @MaGVClean, @ErrMsg);
+    END CATCH
+END;
+GO
+
+-- 7.7. Stored Procedure Đổi Mật Khẩu
+CREATE PROCEDURE dbo.sp_DoiMatKhau
+    @MatKhauHienTai NVARCHAR(128),
+    @MatKhauMoi     NVARCHAR(128)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF IS_MEMBER(N'role_GiaoVien') <> 1
+    BEGIN
+        RAISERROR(N'Từ chối truy cập: Chức năng đổi mật khẩu chỉ dành cho giáo viên thuộc role_GiaoVien!', 16, 1);
+        RETURN;
+    END
+
+    DECLARE @CurrentLogin NVARCHAR(128) = LTRIM(RTRIM(SUSER_SNAME()));
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.GIAOVIEN WHERE RTRIM(MAGV) = UPPER(@CurrentLogin))
+    BEGIN
+        RAISERROR(N'Tài khoản đăng nhập hiện tại [%s] không khớp với hồ sơ giáo viên!', 16, 1, @CurrentLogin);
+        RETURN;
+    END
+
+    IF @MatKhauHienTai IS NULL OR LEN(@MatKhauHienTai) = 0
+    BEGIN
+        RAISERROR(N'Vui lòng nhập mật khẩu hiện tại!', 16, 1);
+        RETURN;
+    END
+
+    IF @MatKhauMoi IS NULL OR LEN(@MatKhauMoi) < 6 OR LEN(@MatKhauMoi) > 128
+    BEGIN
+        RAISERROR(N'Mật khẩu mới phải có độ dài từ 6 đến 128 ký tự!', 16, 1);
+        RETURN;
+    END
+
+    IF @MatKhauHienTai = @MatKhauMoi
     BEGIN
         RAISERROR(N'Mật khẩu mới không được trùng với mật khẩu hiện tại!', 16, 1);
         RETURN;
     END
 
-    UPDATE dbo.TAIKHOAN
-    SET MATKHAU = @MatKhauMoiHash
-    WHERE TENDANGNHAP = @TenDangNhap;
+    BEGIN TRY
+        DECLARE @SqlChangePwd NVARCHAR(MAX) =
+            N'ALTER LOGIN ' + QUOTENAME(@CurrentLogin)
+            + N' WITH PASSWORD = ' + QUOTENAME(@MatKhauMoi, '''')
+            + N' OLD_PASSWORD = ' + QUOTENAME(@MatKhauHienTai, '''') + N';';
+
+        EXEC sys.sp_executesql @SqlChangePwd;
+    END TRY
+    BEGIN CATCH
+        DECLARE @ErrNum INT = ERROR_NUMBER();
+        DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();
+
+        IF @ErrNum IN (15151, 18456)
+        BEGIN
+            RAISERROR(N'Mật khẩu hiện tại không chính xác!', 16, 1);
+            RETURN;
+        END
+
+        RAISERROR(N'Không thể đổi mật khẩu: %s', 16, 1, @ErrMsg);
+    END CATCH
+END;
+GO
+
+-- 7.8. Stored Procedure Danh sách tài khoản Giáo viên & Thống kê Tổng quan
+CREATE PROCEDURE dbo.sp_LayDanhSachTaiKhoanGiaoVien
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF IS_MEMBER(N'role_GiaoVien') <> 1 AND IS_SRVROLEMEMBER(N'sysadmin') <> 1
+    BEGIN
+        RAISERROR(N'Từ chối truy cập: Chỉ giáo viên mới có quyền xem danh sách tài khoản!', 16, 1);
+        RETURN;
+    END
+
+    SELECT
+        RTRIM(gv.MAGV) AS MAGV,
+        gv.HO,
+        gv.TEN,
+        (gv.HO + N' ' + gv.TEN) AS HOTEN_GV,
+        CASE
+            WHEN sp.principal_id IS NOT NULL AND dp.principal_id IS NOT NULL AND role_gv.IS_IN_ROLE = 1
+            THEN sp.name
+            ELSE N'(Chưa tạo)'
+        END AS TENDANGNHAP,
+        CASE
+            WHEN sp.principal_id IS NULL OR dp.principal_id IS NULL OR ISNULL(role_gv.IS_IN_ROLE, 0) = 0
+            THEN 0
+            WHEN sp.is_disabled = 1
+            THEN 2
+            ELSE 1
+        END AS TRANGTHAI_CODE,
+        CASE
+            WHEN sp.principal_id IS NULL OR dp.principal_id IS NULL OR ISNULL(role_gv.IS_IN_ROLE, 0) = 0
+            THEN N'Chưa tạo'
+            WHEN sp.is_disabled = 1
+            THEN N'Đã vô hiệu hóa'
+            ELSE N'Đang hoạt động'
+        END AS TRANGTHAI_TEXT,
+        CASE
+            WHEN sp.principal_id IS NULL OR dp.principal_id IS NULL OR ISNULL(role_gv.IS_IN_ROLE, 0) = 0
+            THEN N'Tạo tài khoản'
+            WHEN sp.is_disabled = 1
+            THEN N'Kích hoạt lại tài khoản'
+            ELSE N'Thu hồi tài khoản'
+        END AS HANHDONG_TEXT,
+        CASE WHEN sp.principal_id IS NOT NULL THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS CO_LOGIN,
+        CASE WHEN dp.principal_id IS NOT NULL THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS CO_DB_USER,
+        CAST(ISNULL(role_gv.IS_IN_ROLE, 0) AS BIT) AS THUOC_ROLE_GV,
+        CAST(ISNULL(sp.is_disabled, 0) AS BIT) AS IS_DISABLED,
+        sp.create_date AS NGAYTAO
+    FROM dbo.GIAOVIEN gv
+    LEFT JOIN sys.server_principals sp
+        ON sp.name = RTRIM(gv.MAGV) COLLATE DATABASE_DEFAULT
+       AND sp.type = 'S'
+    LEFT JOIN sys.database_principals dp
+        ON dp.sid = sp.sid
+       AND dp.type = 'S'
+       AND dp.name = RTRIM(gv.MAGV) COLLATE DATABASE_DEFAULT
+    OUTER APPLY (
+        SELECT TOP 1 1 AS IS_IN_ROLE
+        FROM sys.database_role_members drm
+        INNER JOIN sys.database_principals r ON drm.role_principal_id = r.principal_id
+        WHERE drm.member_principal_id = dp.principal_id
+          AND r.name = N'role_GiaoVien'
+    ) role_gv
+    ORDER BY gv.MAGV ASC;
+END;
+GO
+
+CREATE PROCEDURE dbo.sp_LayGiaoVienChuaCoTaiKhoan
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF IS_MEMBER(N'role_GiaoVien') <> 1 AND IS_SRVROLEMEMBER(N'sysadmin') <> 1
+    BEGIN
+        RAISERROR(N'Từ chối truy cập!', 16, 1);
+        RETURN;
+    END
+
+    SELECT
+        RTRIM(gv.MAGV) AS MAGV,
+        gv.HO,
+        gv.TEN,
+        (RTRIM(gv.MAGV) + N' - ' + gv.HO + N' ' + gv.TEN) AS HIENTHI
+    FROM dbo.GIAOVIEN gv
+    LEFT JOIN sys.server_principals sp
+        ON sp.name = RTRIM(gv.MAGV) COLLATE DATABASE_DEFAULT
+       AND sp.type = 'S'
+    LEFT JOIN sys.database_principals dp
+        ON dp.sid = sp.sid
+       AND dp.type = 'S'
+       AND dp.name = RTRIM(gv.MAGV) COLLATE DATABASE_DEFAULT
+    WHERE sp.principal_id IS NULL
+       OR dp.principal_id IS NULL
+       OR NOT EXISTS (
+           SELECT 1
+           FROM sys.database_role_members drm
+           INNER JOIN sys.database_principals r ON drm.role_principal_id = r.principal_id
+           WHERE drm.member_principal_id = dp.principal_id
+             AND r.name = N'role_GiaoVien'
+       )
+    ORDER BY gv.MAGV ASC;
+END;
+GO
+
+CREATE PROCEDURE dbo.sp_LayThongKeTongQuan
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @TrangThaiGV TABLE (
+        MAGV            NVARCHAR(8) PRIMARY KEY,
+        HOTEN           NVARCHAR(60),
+        CO_VALID_LOGIN  BIT,
+        IS_ACTIVE       BIT,
+        IS_DISABLED     BIT
+    );
+
+    INSERT INTO @TrangThaiGV (MAGV, HOTEN, CO_VALID_LOGIN, IS_ACTIVE, IS_DISABLED)
+    SELECT
+        RTRIM(gv.MAGV) AS MAGV,
+        (gv.HO + N' ' + gv.TEN) AS HOTEN,
+        CASE
+            WHEN sp.principal_id IS NOT NULL AND dp.principal_id IS NOT NULL AND ISNULL(role_gv.IS_IN_ROLE, 0) = 1
+            THEN 1 ELSE 0
+        END AS CO_VALID_LOGIN,
+        CASE
+            WHEN sp.principal_id IS NOT NULL AND dp.principal_id IS NOT NULL AND ISNULL(role_gv.IS_IN_ROLE, 0) = 1 AND sp.is_disabled = 0
+            THEN 1 ELSE 0
+        END AS IS_ACTIVE,
+        CASE
+            WHEN sp.principal_id IS NOT NULL AND dp.principal_id IS NOT NULL AND ISNULL(role_gv.IS_IN_ROLE, 0) = 1 AND sp.is_disabled = 1
+            THEN 1 ELSE 0
+        END AS IS_DISABLED
+    FROM dbo.GIAOVIEN gv
+    LEFT JOIN sys.server_principals sp
+        ON sp.name = RTRIM(gv.MAGV) COLLATE DATABASE_DEFAULT
+       AND sp.type = 'S'
+    LEFT JOIN sys.database_principals dp
+        ON dp.sid = sp.sid
+       AND dp.type = 'S'
+       AND dp.name = RTRIM(gv.MAGV) COLLATE DATABASE_DEFAULT
+    OUTER APPLY (
+        SELECT TOP 1 1 AS IS_IN_ROLE
+        FROM sys.database_role_members drm
+        INNER JOIN sys.database_principals r ON drm.role_principal_id = r.principal_id
+        WHERE drm.member_principal_id = dp.principal_id
+          AND r.name = N'role_GiaoVien'
+    ) role_gv;
+
+    DECLARE @TongSoGV INT = (SELECT COUNT(*) FROM @TrangThaiGV);
+    DECLARE @SoGVCoLogin INT = (SELECT COUNT(*) FROM @TrangThaiGV WHERE CO_VALID_LOGIN = 1);
+    DECLARE @SoLoginHoatDong INT = (SELECT COUNT(*) FROM @TrangThaiGV WHERE IS_ACTIVE = 1);
+    DECLARE @SoLoginVoHieuHoa INT = (SELECT COUNT(*) FROM @TrangThaiGV WHERE IS_DISABLED = 1);
+    DECLARE @SoGVChuaCapLogin INT = (SELECT COUNT(*) FROM @TrangThaiGV WHERE CO_VALID_LOGIN = 0);
+
+    SELECT 1 AS THU_TU, N'1. Tổng số giáo viên (Bảng GIAOVIEN)' AS CHI_TIEU, @TongSoGV AS SO_LUONG
+    UNION ALL
+    SELECT 2, N'2. Số giáo viên có SQL Login (role_GiaoVien)', @SoGVCoLogin
+    UNION ALL
+    SELECT 3, N'3. Số Login giáo viên đang hoạt động (ENABLED)', @SoLoginHoatDong
+    UNION ALL
+    SELECT 4, N'4. Số Login giáo viên đã bị vô hiệu hóa (DISABLED)', @SoLoginVoHieuHoa
+    UNION ALL
+    SELECT 5, N'5. Số giáo viên chưa được cấp Login', @SoGVChuaCapLogin
+    UNION ALL
+    SELECT 6, N'6. Tổng số lớp học (Bảng LOP)', (SELECT COUNT(*) FROM dbo.LOP)
+    UNION ALL
+    SELECT 7, N'7. Tổng số môn học đang sử dụng (Bảng MONHOC)', (SELECT COUNT(*) FROM dbo.MONHOC WHERE DAXOA = 0)
+    UNION ALL
+    SELECT 8, N'8. Tổng số sinh viên đang theo học (Bảng SINHVIEN)', (SELECT COUNT(*) FROM dbo.SINHVIEN WHERE DAXOA = 0)
+    UNION ALL
+    SELECT 9, N'9. Tổng số câu hỏi trắc nghiệm (Bảng BODE)', (SELECT COUNT(*) FROM dbo.BODE)
+    UNION ALL
+    SELECT 10, N'10. Tổng số lịch đăng ký thi (Bảng GIAOVIEN_DANGKY)', (SELECT COUNT(*) FROM dbo.GIAOVIEN_DANGKY)
+    UNION ALL
+    SELECT 11, N'11. Tổng số bài thi / kết quả điểm (Bảng BANGDIEM)', (SELECT COUNT(*) FROM dbo.BANGDIEM)
+    ORDER BY THU_TU ASC;
+END;
+GO
+
+-- 7.9. Stored Procedure dành cho Sinh viên xem Lịch thi & Kết quả cá nhân
+CREATE PROCEDURE dbo.sp_LayLichThiSinhVien
+    @MaLop  NCHAR(8)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @MaLopClean NVARCHAR(8) = UPPER(LTRIM(RTRIM(ISNULL(@MaLop, N''))));
+
+    SELECT
+        RTRIM(dk.MAMH) AS [Mã MH],
+        mh.TENMH AS [Tên môn học],
+        dk.LAN AS [Lần thi],
+        dk.TRINHDO AS [Trình độ],
+        dk.SOCAUTHI AS [Số câu],
+        dk.THOIGIAN AS [Thời gian (phút)],
+        dk.NGAYTHI AS [Ngày thi]
+    FROM dbo.GIAOVIEN_DANGKY dk
+    INNER JOIN dbo.MONHOC mh ON dk.MAMH = mh.MAMH
+    WHERE RTRIM(dk.MALOP) = @MaLopClean
+      AND mh.DAXOA = 0
+    ORDER BY dk.NGAYTHI DESC;
+END;
+GO
+
+CREATE PROCEDURE dbo.sp_LayKetQuaThiCaNhan
+    @MaSV   NCHAR(8) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @CallerLogin NVARCHAR(128) = UPPER(LTRIM(RTRIM(SUSER_SNAME())));
+    DECLARE @TargetMaSV NVARCHAR(8) = UPPER(LTRIM(RTRIM(ISNULL(@MaSV, @CallerLogin))));
+
+    IF IS_MEMBER(N'role_SinhVien') = 1 AND IS_MEMBER(N'role_GiaoVien') = 0
+    BEGIN
+        SET @TargetMaSV = @CallerLogin;
+    END
+
+    SELECT
+        RTRIM(bd.MAMH) AS [Mã MH],
+        mh.TENMH AS [Tên môn học],
+        bd.LAN AS [Lần thi],
+        bd.NGAYTHI AS [Ngày thi],
+        bd.DIEM AS [Điểm số],
+        bd.BAITHI AS [Chi tiết bài làm]
+    FROM dbo.BANGDIEM bd
+    INNER JOIN dbo.MONHOC mh ON bd.MAMH = mh.MAMH
+    WHERE RTRIM(bd.MASV) = @TargetMaSV
+    ORDER BY bd.NGAYTHI DESC;
 END;
 GO
 
 /*==============================================================================
-  PHẦN 8: NẠP DỮ LIỆU MẪU CHUẨN NHẤT QUÁN (MẬT KHẨU ĐÃ BĂM SHA-256)
-  Lưu ý: Chuỗi SHA-256 của '123456' là:
-  8D969EEF6ECAD3C29A3A629280E686CF0C3F5D5A86AFF3CA12020C923ADC6C92
+  PHẦN 8: THIẾT LẬP CERTIFICATE SIGNING & PHÂN QUYỀN DATABASE ROLE
 ==============================================================================*/
 
-DECLARE @PwdHash123456 NVARCHAR(100) = CONVERT(NVARCHAR(64), HASHBYTES('SHA2_256', '123456'), 2);
+CREATE CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem]
+    ENCRYPTION BY PASSWORD = N'Ptit_Cert_TracNghiem#2026!'
+    WITH SUBJECT = N'Certificate ky Stored Procedure quan tri SQL Login TRAC_NGHIEM',
+         EXPIRY_DATE = '2099-12-31';
+GO
 
--- 8.1. Dữ liệu bảng LOP (4 lớp)
+CREATE USER [user_Cert_QuanLyTaiKhoan] FROM CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem];
+GRANT ALTER ANY USER TO [user_Cert_QuanLyTaiKhoan];
+GRANT ALTER ON ROLE::[role_GiaoVien] TO [user_Cert_QuanLyTaiKhoan];
+GRANT ALTER ON ROLE::[role_SinhVien] TO [user_Cert_QuanLyTaiKhoan];
+GRANT VIEW DEFINITION TO [user_Cert_QuanLyTaiKhoan];
+GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[dbo] TO [user_Cert_QuanLyTaiKhoan];
+GO
+
+ADD SIGNATURE TO dbo.sp_TaoTaiKhoanGiaoVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_ThuHoiTaiKhoanGiaoVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_KichHoatLaiTaiKhoanGiaoVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_LayDanhSachTaiKhoanGiaoVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_LayGiaoVienChuaCoTaiKhoan BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_LayDanhSachGiaoVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_TimKiemGiaoVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_LayThongKeTongQuan BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_XoaGiaoVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_CapTaiKhoanSinhVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_ThemSinhVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_XoaSinhVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_PhucHoiSinhVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_HoanTacThemSinhVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_LayThongTinDangNhapHienTai BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+GO
+
+DECLARE @CertBin VARBINARY(MAX) = CERTENCODED(CERT_ID(N'cert_QuanLyTaiKhoan_TracNghiem'));
+DECLARE @SqlMasterCert NVARCHAR(MAX) = N'
+USE [master];
+IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N''login_Cert_QuanLyTaiKhoan'')
+    DROP LOGIN [login_Cert_QuanLyTaiKhoan];
+IF EXISTS (SELECT 1 FROM sys.certificates WHERE name = N''cert_QuanLyTaiKhoan_TracNghiem'')
+    DROP CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem];
+
+CREATE CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem]
+    FROM BINARY = ' + CONVERT(NVARCHAR(MAX), @CertBin, 1) + N';
+
+CREATE LOGIN [login_Cert_QuanLyTaiKhoan]
+    FROM CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem];
+
+GRANT ALTER ANY LOGIN TO [login_Cert_QuanLyTaiKhoan];
+GRANT ALTER ANY CONNECTION TO [login_Cert_QuanLyTaiKhoan];
+GRANT VIEW ANY DEFINITION TO [login_Cert_QuanLyTaiKhoan];
+GRANT VIEW SERVER STATE TO [login_Cert_QuanLyTaiKhoan];
+';
+EXEC sys.sp_executesql @SqlMasterCert;
+GO
+
+USE [TRAC_NGHIEM];
+GO
+
+-- Phân quyền role_GiaoVien
+GRANT SELECT ON dbo.LOP TO [role_GiaoVien];
+GRANT SELECT, DELETE ON dbo.MONHOC TO [role_GiaoVien];
+GRANT SELECT, DELETE ON dbo.SINHVIEN TO [role_GiaoVien];
+GRANT SELECT ON dbo.GIAOVIEN TO [role_GiaoVien];
+GRANT SELECT, INSERT, UPDATE, DELETE ON dbo.BODE TO [role_GiaoVien];
+GRANT SELECT, INSERT, UPDATE, DELETE ON dbo.GIAOVIEN_DANGKY TO [role_GiaoVien];
+GRANT SELECT ON dbo.BANGDIEM TO [role_GiaoVien];
+
+GRANT SELECT ON dbo.vw_DanhSachLop TO [role_GiaoVien];
+GRANT SELECT ON dbo.vw_DanhSachMonHoc TO [role_GiaoVien];
+GRANT SELECT ON dbo.vw_DanhSachSinhVienTheoLop TO [role_GiaoVien];
+GRANT SELECT ON dbo.vw_DanhSachGiaoVien TO [role_GiaoVien];
+
+GRANT EXECUTE ON dbo.sp_LayThongTinDangNhapHienTai TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_ThemMonHoc TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_CapNhatMonHoc TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_XoaMonHoc TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_PhucHoiMonHoc TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_ThemLop TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_CapNhatLop TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_XoaLop TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_ThemSinhVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_CapNhatSinhVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_XoaSinhVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_PhucHoiSinhVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_HoanTacThemSinhVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_CapTaiKhoanSinhVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_ThemGiaoVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_CapNhatGiaoVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_XoaGiaoVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_LayDanhSachGiaoVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_TimKiemGiaoVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_TaoTaiKhoanGiaoVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_ThuHoiTaiKhoanGiaoVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_KichHoatLaiTaiKhoanGiaoVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_LayDanhSachTaiKhoanGiaoVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_LayGiaoVienChuaCoTaiKhoan TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_DoiMatKhau TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_LayThongKeTongQuan TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_LayLichThiSinhVien TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_LayKetQuaThiCaNhan TO [role_GiaoVien];
+
+GRANT BACKUP DATABASE TO [role_GiaoVien];
+GRANT VIEW DEFINITION TO [role_GiaoVien];
+GO
+
+-- Phân quyền role_SinhVien
+GRANT EXECUTE ON dbo.sp_LayThongTinDangNhapHienTai TO [role_SinhVien];
+GRANT EXECUTE ON dbo.sp_LayLichThiSinhVien TO [role_SinhVien];
+GRANT EXECUTE ON dbo.sp_LayKetQuaThiCaNhan TO [role_SinhVien];
+
+DENY INSERT, UPDATE, DELETE ON dbo.LOP TO [role_SinhVien];
+DENY INSERT, UPDATE, DELETE ON dbo.MONHOC TO [role_SinhVien];
+DENY INSERT, UPDATE, DELETE ON dbo.SINHVIEN TO [role_SinhVien];
+DENY SELECT, INSERT, UPDATE, DELETE ON dbo.GIAOVIEN TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_ThemMonHoc TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_CapNhatMonHoc TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_XoaMonHoc TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_PhucHoiMonHoc TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_ThemLop TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_CapNhatLop TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_XoaLop TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_ThemSinhVien TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_CapNhatSinhVien TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_XoaSinhVien TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_PhucHoiSinhVien TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_ThemGiaoVien TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_CapNhatGiaoVien TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_XoaGiaoVien TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_TaoTaiKhoanGiaoVien TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_ThuHoiTaiKhoanGiaoVien TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_KichHoatLaiTaiKhoanGiaoVien TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_DoiMatKhau TO [role_SinhVien];
+GO
+
+/*==============================================================================
+  PHẦN 9: NẠP DỮ LIỆU MẪU & KHỞI TẠO SQL SERVER LOGIN + DATABASE USER
+==============================================================================*/
+
+-- 9.1. Dữ liệu bảng LOP (4 lớp)
 INSERT INTO dbo.LOP (MALOP, TENLOP) VALUES
 (N'CNTT01  ', N'Công nghệ thông tin 01'),
 (N'CNTT02  ', N'Công nghệ thông tin 02'),
 (N'ATTT01  ', N'An toàn thông tin 01'),
-(N'KTPM01  ', N'Kỹ thuật phần mềm 01'); -- Lớp trống chưa có SV để test xóa Lớp
+(N'KTPM01  ', N'Kỹ thuật phần mềm 01');
 
--- 8.2. Dữ liệu bảng MONHOC (5 môn học)
+-- 9.2. Dữ liệu bảng MONHOC (5 môn học)
 INSERT INTO dbo.MONHOC (MAMH, TENMH, DAXOA) VALUES
 (N'CSDL ', N'Cơ sở dữ liệu', 0),
 (N'CTDL ', N'Cấu trúc dữ liệu và giải thuật', 0),
 (N'MMT  ', N'Mạng máy tính', 0),
 (N'LTHDT', N'Lập trình hướng đối tượng', 0),
-(N'THDC ', N'Tin học đại cương', 0); -- Môn chưa có đề thi để test sửa/xóa/phục hồi
+(N'THDC ', N'Tin học đại cương', 0);
 
--- 8.3. Dữ liệu bảng GIAOVIEN (4 giảng viên)
+-- 9.3. Dữ liệu bảng GIAOVIEN (5 giảng viên: gồm GV001..GV004 và GV-8-4)
 INSERT INTO dbo.GIAOVIEN (MAGV, HO, TEN, SODTLL, DIACHI) VALUES
-(N'GV001   ', N'Nguyễn Văn', N'An',   N'0901234567  ', N'Khoa CNTT1 - PTIT Hà Nội'),
-(N'GV002   ', N'Trần Thị',   N'Bình', N'0912345678  ', N'Khoa CNTT2 - PTIT TP.HCM'),
-(N'GV003   ', N'Lê Hoàng',   N'Cường',N'0987654321  ', N'Khoa An toàn thông tin - PTIT'),
-(N'GV004   ', N'Phạm Minh',  N'Đức',  N'0977889900  ', N'Bộ môn Công nghệ phần mềm - PTIT'); -- GV003, GV004 chưa có tài khoản để test Tạo Tài Khoản
+(N'GV001   ', N'Nguyễn Văn', N'An',    N'0901234567  ', N'Khoa CNTT1 - PTIT Hà Nội'),
+(N'GV002   ', N'Trần Thị',   N'Bình',  N'0912345678  ', N'Khoa CNTT2 - PTIT TP.HCM'),
+(N'GV003   ', N'Lê Hoàng',   N'Cường', N'0987654321  ', N'Khoa An toàn thông tin - PTIT'),
+(N'GV004   ', N'Phạm Minh',  N'Đức',   N'0977889900  ', N'Bộ môn Công nghệ phần mềm - PTIT'),
+(N'GV-8-4  ', N'Đặng Quốc',  N'Huy',   N'0934567890  ', N'Khoa Đa phương tiện - PTIT');
 
--- 8.4. Dữ liệu bảng SINHVIEN (6 sinh viên)
+-- 9.4. Dữ liệu bảng SINHVIEN (6 sinh viên)
 INSERT INTO dbo.SINHVIEN (MASV, HO, TEN, NGAYSINH, DIACHI, MALOP, DAXOA) VALUES
 (N'SV001   ', N'Lê Văn',       N'Nam',   '2004-05-12', N'Quận 9, TP. Thủ Đức', N'CNTT01  ', 0),
 (N'SV002   ', N'Phạm Thị',     N'Hoa',   '2004-08-20', N'Quận Bình Thạnh, TP.HCM', N'CNTT01  ', 0),
@@ -1021,22 +1834,7 @@ INSERT INTO dbo.SINHVIEN (MASV, HO, TEN, NGAYSINH, DIACHI, MALOP, DAXOA) VALUES
 (N'SV005   ', N'Vũ Quốc',      N'Khánh', '2004-09-02', N'TP. Dĩ An, Bình Dương', N'CNTT02  ', 0),
 (N'SV006   ', N'Ngô Gia',      N'Bảo',   '2004-04-30', N'Quận Tân Bình, TP.HCM', N'ATTT01  ', 0);
 
--- 8.5. Dữ liệu bảng TAIKHOAN (Mật khẩu mặc định đều là '123456' đã băm SHA-256)
--- Tài khoản giảng viên: admin (GV001), gv002 (GV002)
-INSERT INTO dbo.TAIKHOAN (TENDANGNHAP, MATKHAU, MAGV, MASV, QUYEN, TRANGTHAI) VALUES
-(N'admin', @PwdHash123456, N'GV001   ', NULL, N'GIANGVIEN', 1),
-(N'gv002', @PwdHash123456, N'GV002   ', NULL, N'GIANGVIEN', 1);
-
--- Tài khoản sinh viên (Login Name = MASV)
-INSERT INTO dbo.TAIKHOAN (TENDANGNHAP, MATKHAU, MAGV, MASV, QUYEN, TRANGTHAI) VALUES
-(N'SV001', @PwdHash123456, NULL, N'SV001   ', N'SINHVIEN', 1),
-(N'SV002', @PwdHash123456, NULL, N'SV002   ', N'SINHVIEN', 1),
-(N'SV003', @PwdHash123456, NULL, N'SV003   ', N'SINHVIEN', 1),
-(N'SV004', @PwdHash123456, NULL, N'SV004   ', N'SINHVIEN', 1),
-(N'SV005', @PwdHash123456, NULL, N'SV005   ', N'SINHVIEN', 1),
-(N'SV006', @PwdHash123456, NULL, N'SV006   ', N'SINHVIEN', 1);
-
--- 8.6. Dữ liệu mẫu bảng BODE (12 câu hỏi môn CSDL và CTDL để tích hợp Người 2)
+-- 9.5. Dữ liệu mẫu bảng BODE
 INSERT INTO dbo.BODE (MAMH, TRINHDO, NOIDUNG, A, B, C, D, DAP_AN, MAGV) VALUES
 (N'CSDL ', N'A', N'Khóa chính (Primary Key) trong bảng quan hệ có đặc điểm gì?', N'Có thể nhận giá trị NULL', N'Xác định duy nhất một bộ và không được NULL', N'Có thể trùng lặp dữ liệu', N'Chỉ dùng cho kiểu số nguyên', N'B', N'GV001   '),
 (N'CSDL ', N'A', N'Câu lệnh SQL nào dùng để trích xuất dữ liệu từ bảng?', N'SELECT', N'UPDATE', N'DELETE', N'INSERT', N'A', N'GV001   '),
@@ -1051,15 +1849,61 @@ INSERT INTO dbo.BODE (MAMH, TRINHDO, NOIDUNG, A, B, C, D, DAP_AN, MAGV) VALUES
 (N'CTDL ', N'A', N'Cấu trúc dữ liệu Ngăn xếp (Stack) hoạt động theo nguyên tắc nào?', N'FIFO', N'LIFO', N'LILO', N'Random', N'B', N'GV002   '),
 (N'CTDL ', N'A', N'Độ phức tạp thời gian trung bình của thuật toán Tìm kiếm nhị phân (Binary Search) là?', N'O(1)', N'O(log n)', N'O(n)', N'O(n^2)', N'B', N'GV002   ');
 
--- 8.7. Dữ liệu mẫu bảng GIAOVIEN_DANGKY
+-- 9.6. Dữ liệu mẫu bảng GIAOVIEN_DANGKY
 INSERT INTO dbo.GIAOVIEN_DANGKY (MAGV, MALOP, MAMH, TRINHDO, NGAYTHI, LAN, SOCAUTHI, THOIGIAN) VALUES
 (N'GV001   ', N'CNTT01  ', N'CSDL ', N'A', GETDATE(), 1, 10, 15);
 
--- 8.8. Dữ liệu mẫu bảng BANGDIEM
+-- 9.7. Dữ liệu mẫu bảng BANGDIEM
 INSERT INTO dbo.BANGDIEM (MASV, MAMH, LAN, NGAYTHI, DIEM, BAITHI) VALUES
 (N'SV001   ', N'CSDL ', 1, GETDATE(), 9.0, N'1:B;2:A;3:C;4:B;5:C;6:B;7:A;8:C;9:B;10:A'),
 (N'SV002   ', N'CSDL ', 1, GETDATE(), 8.0, N'1:B;2:A;3:C;4:B;5:C;6:B;7:A;8:A;9:B;10:B');
 GO
 
-PRINT N'=== ĐÃ KHỞI TẠO THÀNH CÔNG CƠ SỞ DỮ LIỆU TRAC_NGHIEM MỚI ===';
+-- 9.8. Cấp SQL Server Login + Database User cho Giáo viên (GV001, GV002, GV-8-4) và Sinh viên (SV001..SV006)
+-- Nếu SQL Login đã tồn tại từ trước trên Server thì chỉ tạo/ánh xạ Database User và gán Role
+DECLARE @TeacherList TABLE (MAGV NVARCHAR(8));
+INSERT INTO @TeacherList VALUES (N'GV001'), (N'GV002'), (N'GV-8-4');
+
+DECLARE @CurGV NVARCHAR(8);
+DECLARE curInitGV CURSOR LOCAL FAST_FORWARD FOR SELECT MAGV FROM @TeacherList;
+OPEN curInitGV;
+FETCH NEXT FROM curInitGV INTO @CurGV;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = @CurGV COLLATE DATABASE_DEFAULT)
+    BEGIN
+        EXEC dbo.sp_TaoTaiKhoanGiaoVien @MaGV = @CurGV, @TenDangNhap = @CurGV, @MatKhauPlain = N'123456';
+    END
+    ELSE
+    BEGIN
+        DECLARE @SqlEnGV NVARCHAR(MAX) = N'ALTER LOGIN ' + QUOTENAME(@CurGV) + N' ENABLE;';
+        EXEC sys.sp_executesql @SqlEnGV;
+        IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = @CurGV COLLATE DATABASE_DEFAULT)
+        BEGIN
+            DECLARE @SqlUsrGV NVARCHAR(MAX) = N'CREATE USER ' + QUOTENAME(@CurGV) + N' FOR LOGIN ' + QUOTENAME(@CurGV) + N';';
+            EXEC sys.sp_executesql @SqlUsrGV;
+        END
+        DECLARE @SqlRoleGV NVARCHAR(MAX) = N'ALTER ROLE [role_GiaoVien] ADD MEMBER ' + QUOTENAME(@CurGV) + N';';
+        EXEC sys.sp_executesql @SqlRoleGV;
+    END
+    FETCH NEXT FROM curInitGV INTO @CurGV;
+END
+CLOSE curInitGV;
+DEALLOCATE curInitGV;
+GO
+
+DECLARE @CurSV NCHAR(8);
+DECLARE curInitSV CURSOR LOCAL FAST_FORWARD FOR SELECT MASV FROM dbo.SINHVIEN WHERE DAXOA = 0;
+OPEN curInitSV;
+FETCH NEXT FROM curInitSV INTO @CurSV;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    EXEC dbo.sp_CapTaiKhoanSinhVien @MaSV = @CurSV, @MatKhauPlain = N'123456';
+    FETCH NEXT FROM curInitSV INTO @CurSV;
+END
+CLOSE curInitSV;
+DEALLOCATE curInitSV;
+GO
+
+PRINT N'=== ĐÃ KHỞI TẠO THÀNH CÔNG CƠ SỞ DỮ LIỆU TRAC_NGHIEM (SQL SERVER LOGIN & DATABASE ROLE) ===';
 GO

@@ -1,14 +1,16 @@
-﻿using System;
+using System;
 
 namespace TRAC_NGHIEM.Models
 {
     /// <summary>
-    /// Thực thể Tài khoản người dùng (Bảng TAIKHOAN)
+    /// Thông tin phiên đăng nhập SQL Server Login & Database Role của người dùng hiện tại.
+    /// (Không sử dụng bảng TAIKHOAN; thông tin lấy từ SUSER_SNAME(), USER_NAME(), IS_MEMBER() và GIAOVIEN/SINHVIEN).
     /// </summary>
     public class TaiKhoan
     {
         public string TenDangNhap { get; set; }
-        public string MatKhauHash { get; set; }
+        public string DbUserName { get; set; }
+        public string DatabaseRole { get; set; }
         public string MaGV { get; set; }
         public string MaSV { get; set; }
         public string Quyen { get; set; }
@@ -19,12 +21,20 @@ namespace TRAC_NGHIEM.Models
 
         public bool LaGiaoVien
         {
-            get { return string.Equals(Quyen, "GIANGVIEN", StringComparison.OrdinalIgnoreCase); }
+            get
+            {
+                return string.Equals(Quyen, "GIANGVIEN", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(DatabaseRole, "role_GiaoVien", StringComparison.OrdinalIgnoreCase);
+            }
         }
 
         public bool LaSinhVien
         {
-            get { return string.Equals(Quyen, "SINHVIEN", StringComparison.OrdinalIgnoreCase); }
+            get
+            {
+                return string.Equals(Quyen, "SINHVIEN", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(DatabaseRole, "role_SinhVien", StringComparison.OrdinalIgnoreCase);
+            }
         }
 
         public string MaNguoiDung
@@ -35,7 +45,8 @@ namespace TRAC_NGHIEM.Models
         public TaiKhoan()
         {
             TenDangNhap = string.Empty;
-            MatKhauHash = string.Empty;
+            DbUserName = string.Empty;
+            DatabaseRole = string.Empty;
             MaGV = string.Empty;
             MaSV = string.Empty;
             Quyen = string.Empty;
@@ -46,4 +57,3 @@ namespace TRAC_NGHIEM.Models
         }
     }
 }
-

@@ -8,12 +8,14 @@ using TRAC_NGHIEM.Models;
 namespace TRAC_NGHIEM.Forms
 {
     /// <summary>
-    /// Form Đổi mật khẩu dành riêng cho Giảng viên đang đăng nhập.
-    /// Chỉ cho phép đổi mật khẩu của chính tài khoản đang đăng nhập sau khi xác minh đúng mật khẩu hiện tại.
+    /// Form Đổi mật khẩu dành riêng cho Giáo viên đang đăng nhập.
+    /// Sử dụng cơ chế gốc của SQL Server Login (ALTER LOGIN ... WITH PASSWORD ... OLD_PASSWORD ...).
+    /// Không lưu mật khẩu vào bất kỳ bảng nào và không cho phép đổi mật khẩu của người khác.
     /// </summary>
     public class FrmDoiMatKhau : Form
     {
         private readonly TaiKhoanBLL _bll = new TaiKhoanBLL();
+        private bool _isSaving = false;
 
         private Panel pnlCard;
         private Label lblHeader;
@@ -30,7 +32,7 @@ namespace TRAC_NGHIEM.Forms
 
         public FrmDoiMatKhau()
         {
-            SessionManager.EnsureGiaoVienPermission("Đổi mật khẩu giảng viên");
+            SessionManager.EnsureGiaoVienPermission("Đổi mật khẩu tài khoản SQL Login");
             InitializeComponent();
         }
 
@@ -41,7 +43,7 @@ namespace TRAC_NGHIEM.Forms
 
             pnlCard = new Panel
             {
-                Size = new Size(520, 440),
+                Size = new Size(540, 450),
                 Location = new Point(60, 30),
                 BackColor = Color.White,
                 Padding = new Padding(30)
@@ -51,24 +53,24 @@ namespace TRAC_NGHIEM.Forms
 
             lblHeader = new Label
             {
-                Text = "ĐỔI MẬT KHẨU TÀI KHOẢN GIẢNG VIÊN",
+                Text = "ĐỔI MẬT KHẨU SQL SERVER LOGIN",
                 Font = new Font("Segoe UI", 14F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(185, 28, 28),
                 Location = new Point(30, 24),
-                Size = new Size(460, 32)
+                Size = new Size(480, 32)
             };
 
             lblCurrentUserInfo = new Label
             {
-                Text = string.Format("Tài khoản đang đăng nhập: {0}  |  Giảng viên: {1} ({2})",
-                    user.TenDangNhap, user.HoTen, user.MaGV),
+                Text = string.Format("SQL Login hiện tại: {0}  |  Giáo viên: {1} ({2})  |  Role: {3}",
+                    user.TenDangNhap, user.HoTen, user.MaGV, user.DatabaseRole),
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(30, 64, 175),
                 Location = new Point(30, 62),
-                Size = new Size(460, 26)
+                Size = new Size(480, 26)
             };
 
-            lblOldPass = CreateLabel("1. Mật khẩu hiện tại:", 30, 105);
+            lblOldPass = CreateLabel("1. Mật khẩu SQL Login hiện tại:", 30, 105);
             txtOldPass = CreatePasswordBox(30, 130);
 
             lblNewPass = CreateLabel("2. Mật khẩu mới (Tối thiểu 6 ký tự, khác mật khẩu cũ):", 30, 178);
@@ -79,9 +81,9 @@ namespace TRAC_NGHIEM.Forms
 
             chkShowPass = new CheckBox
             {
-                Text = "Hiển thị mật khẩu",
+                Text = "Hiển thị mật khẩu khi đang nhập",
                 Location = new Point(30, 320),
-                Size = new Size(200, 24),
+                Size = new Size(260, 24),
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(71, 85, 105)
             };
@@ -124,6 +126,7 @@ namespace TRAC_NGHIEM.Forms
                 txtOldPass.Clear();
                 txtNewPass.Clear();
                 txtConfirmPass.Clear();
+                chkShowPass.Checked = false;
                 txtOldPass.Focus();
             };
 
@@ -145,7 +148,7 @@ namespace TRAC_NGHIEM.Forms
             {
                 Text = text,
                 Location = new Point(x, y),
-                Size = new Size(450, 22),
+                Size = new Size(460, 22),
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(51, 65, 85)
             };
@@ -157,7 +160,7 @@ namespace TRAC_NGHIEM.Forms
             {
                 Location = new Point(x, y),
                 Size = new Size(450, 30),
-                MaxLength = 50,
+                MaxLength = 128,
                 UseSystemPasswordChar = true,
                 Font = new Font("Segoe UI", 10.5F, FontStyle.Regular)
             };
@@ -165,19 +168,32 @@ namespace TRAC_NGHIEM.Forms
 
         private void BtnSave_Click(object sender, EventArgs e)
         {
-            string thongBao;
-            if (_bll.DoiMatKhau(txtOldPass.Text, txtNewPass.Text, txtConfirmPass.Text, out thongBao))
+            if (_isSaving) return;
+
+            try
             {
-                MessageBox.Show(thongBao, "Đổi mật khẩu thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                txtOldPass.Clear();
-                txtNewPass.Clear();
-                txtConfirmPass.Clear();
+                _isSaving = true;
+                btnSave.Enabled = false;
+
+                string thongBao;
+                if (_bll.DoiMatKhau(txtOldPass.Text, txtNewPass.Text, txtConfirmPass.Text, out thongBao))
+                {
+                    chkShowPass.Checked = false;
+                    txtOldPass.Clear();
+                    txtNewPass.Clear();
+                    txtConfirmPass.Clear();
+                    MessageBox.Show(thongBao, "Đổi mật khẩu thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    MessageBox.Show(thongBao, "Không thể đổi mật khẩu", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             }
-            else
+            finally
             {
-                MessageBox.Show(thongBao, "Không thể đổi mật khẩu", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _isSaving = false;
+                btnSave.Enabled = true;
             }
         }
     }
 }
-

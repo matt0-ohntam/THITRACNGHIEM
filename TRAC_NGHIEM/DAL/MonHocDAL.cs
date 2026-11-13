@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Data;
 using System.Data.SqlClient;
 using TRAC_NGHIEM.Models;
@@ -91,12 +91,12 @@ namespace TRAC_NGHIEM.DAL
         {
             const string sql = @"
                 DELETE FROM dbo.MONHOC
-                WHERE RTRIM(MAMH) = @MaMH
-                  AND NOT EXISTS (SELECT 1 FROM dbo.BODE WHERE RTRIM(MAMH) = @MaMH)
-                  AND NOT EXISTS (SELECT 1 FROM dbo.GIAOVIEN_DANGKY WHERE RTRIM(MAMH) = @MaMH)
-                  AND NOT EXISTS (SELECT 1 FROM dbo.BANGDIEM WHERE RTRIM(MAMH) = @MaMH);";
+                WHERE RTRIM(MAMH) = RTRIM(@MaMH)
+                  AND NOT EXISTS (SELECT 1 FROM dbo.BODE WHERE RTRIM(MAMH) = RTRIM(@MaMH))
+                  AND NOT EXISTS (SELECT 1 FROM dbo.GIAOVIEN_DANGKY WHERE RTRIM(MAMH) = RTRIM(@MaMH))
+                  AND NOT EXISTS (SELECT 1 FROM dbo.BANGDIEM WHERE RTRIM(MAMH) = RTRIM(@MaMH));";
 
-            SqlParameter param = new SqlParameter("@MaMH", SqlDbType.NVarChar, 10)
+            SqlParameter param = new SqlParameter("@MaMH", SqlDbType.NChar, 5)
             {
                 Value = maMH.Trim().ToUpperInvariant()
             };
@@ -104,4 +104,3 @@ namespace TRAC_NGHIEM.DAL
         }
     }
 }
-

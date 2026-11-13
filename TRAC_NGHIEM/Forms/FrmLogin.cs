@@ -2,13 +2,16 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 using TRAC_NGHIEM.BLL;
+using TRAC_NGHIEM.Helpers;
 using TRAC_NGHIEM.Models;
 
 namespace TRAC_NGHIEM.Forms
 {
     /// <summary>
     /// Form Đăng nhập hệ thống Quản lý Thi Trắc Nghiệm PTIT.
-    /// Hỗ trợ đăng nhập cho cả Giảng viên (Username) và Sinh viên (Login Name = MASV).
+    /// Xác thực trực tiếp bằng SQL Server Authentication (SQL Server Login):
+    /// - Giáo viên: Username = MAGV (thuộc role_GiaoVien).
+    /// - Sinh viên: Username = MASV (thuộc role_SinhVien).
     /// </summary>
     public class FrmLogin : Form
     {
@@ -30,6 +33,7 @@ namespace TRAC_NGHIEM.Forms
         private Label lblStatusMessage;
 
         private readonly TaiKhoanBLL _taiKhoanBLL = new TaiKhoanBLL();
+        private bool _isLoggingIn = false;
 
         public FrmLogin()
         {
@@ -38,7 +42,7 @@ namespace TRAC_NGHIEM.Forms
 
         private void InitializeComponent()
         {
-            this.Text = "Đăng nhập - Hệ thống Quản lý Thi Trắc Nghiệm PTIT";
+            this.Text = "Đăng nhập SQL Server - Hệ thống Quản lý Thi Trắc Nghiệm PTIT";
             this.Size = new Size(820, 480);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -51,7 +55,7 @@ namespace TRAC_NGHIEM.Forms
             {
                 Dock = DockStyle.Left,
                 Width = 330,
-                BackColor = Color.FromArgb(185, 28, 28), // Đỏ PTIT
+                BackColor = Color.FromArgb(185, 28, 28),
                 Padding = new Padding(28)
             };
 
@@ -75,18 +79,18 @@ namespace TRAC_NGHIEM.Forms
 
             lblBrandDesc = new Label
             {
-                Text = "Học viện Công nghệ Bưu chính Viễn thông",
+                Text = "Học viện Công nghệ Bưu chính Viễn thông\nXác thực bằng SQL Server Login & Role",
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(254, 226, 226),
                 Location = new Point(25, 165),
-                Size = new Size(280, 30)
+                Size = new Size(280, 50)
             };
 
             pnlLeftBanner.Controls.Add(lblBrandTitle);
             pnlLeftBanner.Controls.Add(lblBrandSubTitle);
             pnlLeftBanner.Controls.Add(lblBrandDesc);
 
-            // 2. Panel bên phải: Khung nhập thông tin đăng nhập
+            // 2. Panel bên phải: Khung nhập thông tin đăng nhập SQL Server
             pnlRightForm = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -105,7 +109,7 @@ namespace TRAC_NGHIEM.Forms
 
             lblFormSubHeader = new Label
             {
-                Text = "Sinh viên sử dụng Mã sinh viên (MASV) làm Tên đăng nhập",
+                Text = "Giáo viên đăng nhập bằng MAGV | Sinh viên đăng nhập bằng MASV",
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(100, 116, 139),
                 Location = new Point(45, 75),
@@ -114,7 +118,7 @@ namespace TRAC_NGHIEM.Forms
 
             lblUsername = new Label
             {
-                Text = "Tên đăng nhập / Mã sinh viên (MASV):",
+                Text = "Tài khoản SQL Login (MAGV hoặc MASV):",
                 Font = new Font("Segoe UI", 10F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(51, 65, 85),
                 Location = new Point(45, 118),
@@ -126,12 +130,13 @@ namespace TRAC_NGHIEM.Forms
                 Font = new Font("Segoe UI", 11F, FontStyle.Regular),
                 Location = new Point(45, 145),
                 Size = new Size(380, 30),
-                MaxLength = 50
+                MaxLength = 50,
+                CharacterCasing = CharacterCasing.Upper
             };
 
             lblPassword = new Label
             {
-                Text = "Mật khẩu:",
+                Text = "Mật khẩu SQL Server:",
                 Font = new Font("Segoe UI", 10F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(51, 65, 85),
                 Location = new Point(45, 190),
@@ -143,7 +148,7 @@ namespace TRAC_NGHIEM.Forms
                 Font = new Font("Segoe UI", 11F, FontStyle.Regular),
                 Location = new Point(45, 217),
                 Size = new Size(380, 30),
-                MaxLength = 50,
+                MaxLength = 128,
                 UseSystemPasswordChar = true
             };
 
@@ -220,40 +225,57 @@ namespace TRAC_NGHIEM.Forms
 
         private void BtnLogin_Click(object sender, EventArgs e)
         {
-            lblStatusMessage.Text = string.Empty;
+            if (_isLoggingIn) return;
 
-            string username = txtUsername.Text.Trim();
-            string password = txtPassword.Text;
-
-            TaiKhoan taiKhoan;
-            string thongBao;
-
-            bool success = _taiKhoanBLL.DangNhap(username, password, out taiKhoan, out thongBao);
-            if (!success)
+            try
             {
-                lblStatusMessage.Text = thongBao;
-                MessageBox.Show(thongBao, "Đăng nhập không thành công", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                txtPassword.SelectAll();
-                txtPassword.Focus();
-                return;
-            }
+                _isLoggingIn = true;
+                btnLogin.Enabled = false;
+                lblStatusMessage.Text = string.Empty;
 
-            // Chuyển sang giao diện FrmMain tương ứng với quyền hạn
-            this.Hide();
-            using (FrmMain frmMain = new FrmMain())
-            {
-                DialogResult result = frmMain.ShowDialog(this);
-                if (result == DialogResult.Retry)
+                string username = txtUsername.Text.Trim();
+                string password = txtPassword.Text;
+
+                TaiKhoan taiKhoan;
+                string thongBao;
+
+                bool success = _taiKhoanBLL.DangNhap(username, password, out taiKhoan, out thongBao);
+                if (!success)
                 {
-                    // Người dùng chọn Đăng xuất -> Xóa mật khẩu trên FrmLogin và hiển thị lại
-                    txtPassword.Clear();
-                    lblStatusMessage.Text = string.Empty;
-                    this.Show();
-                    txtUsername.Focus();
+                    lblStatusMessage.Text = thongBao;
+                    MessageBox.Show(thongBao, "Đăng nhập không thành công", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    txtPassword.SelectAll();
+                    txtPassword.Focus();
+                    return;
                 }
-                else
+
+                // Chuyển sang giao diện FrmMain tương ứng với quyền SQL Server Role
+                this.Hide();
+                using (FrmMain frmMain = new FrmMain())
                 {
-                    this.Close();
+                    DialogResult result = frmMain.ShowDialog(this);
+                    if (result == DialogResult.Retry)
+                    {
+                        // Người dùng chọn Đăng xuất -> Giải phóng kết nối SQL và hiển thị lại FrmLogin
+                        SessionManager.ClearSession();
+                        txtPassword.Clear();
+                        lblStatusMessage.Text = string.Empty;
+                        this.Show();
+                        txtUsername.Focus();
+                    }
+                    else
+                    {
+                        SessionManager.ClearSession();
+                        this.Close();
+                    }
+                }
+            }
+            finally
+            {
+                _isLoggingIn = false;
+                if (!this.IsDisposed)
+                {
+                    btnLogin.Enabled = true;
                 }
             }
         }
@@ -268,9 +290,9 @@ namespace TRAC_NGHIEM.Forms
 
             if (confirm == DialogResult.Yes)
             {
+                SessionManager.ClearSession();
                 Application.Exit();
             }
         }
     }
 }
-

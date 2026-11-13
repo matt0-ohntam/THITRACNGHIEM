@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Data;
 using System.Data.SqlClient;
 using TRAC_NGHIEM.Helpers;
@@ -7,7 +7,8 @@ using TRAC_NGHIEM.Models;
 namespace TRAC_NGHIEM.DAL
 {
     /// <summary>
-    /// Lớp truy cập dữ liệu Sinh viên (Bảng SINHVIEN & View vw_DanhSachSinhVienTheoLop)
+    /// Lớp truy cập dữ liệu Sinh viên (Bảng SINHVIEN & View vw_DanhSachSinhVienTheoLop).
+    /// Sử dụng Parameterized Query đúng kiểu dữ liệu cột và không truy vấn bảng TAIKHOAN.
     /// </summary>
     public class SinhVienDAL
     {
@@ -16,10 +17,10 @@ namespace TRAC_NGHIEM.DAL
             const string sql = @"
                 SELECT MASV, HO, TEN, HOTEN, NGAYSINH, DIACHI, MALOP, TENLOP, SO_LAN_THI
                 FROM dbo.vw_DanhSachSinhVienTheoLop
-                WHERE MALOP = @MaLop
+                WHERE RTRIM(MALOP) = RTRIM(@MaLop)
                 ORDER BY TEN ASC, HO ASC, MASV ASC;";
 
-            SqlParameter param = new SqlParameter("@MaLop", SqlDbType.NVarChar, 10)
+            SqlParameter param = new SqlParameter("@MaLop", SqlDbType.NChar, 8)
             {
                 Value = (maLop ?? string.Empty).Trim().ToUpperInvariant()
             };
@@ -38,16 +39,16 @@ namespace TRAC_NGHIEM.DAL
 
         public DataTable SearchSinhVien(string maLop, string keyword)
         {
-            string sql = @"
+            const string sql = @"
                 SELECT MASV, HO, TEN, HOTEN, NGAYSINH, DIACHI, MALOP, TENLOP, SO_LAN_THI
                 FROM dbo.vw_DanhSachSinhVienTheoLop
-                WHERE (@MaLop = N'' OR MALOP = @MaLop)
+                WHERE (RTRIM(@MaLop) = N'' OR RTRIM(MALOP) = RTRIM(@MaLop))
                   AND (MASV LIKE @Keyword OR HO LIKE @Keyword OR TEN LIKE @Keyword OR HOTEN LIKE @Keyword)
                 ORDER BY MALOP ASC, TEN ASC, HO ASC;";
 
             SqlParameter[] parameters = new SqlParameter[]
             {
-                new SqlParameter("@MaLop", SqlDbType.NVarChar, 10) { Value = (maLop ?? string.Empty).Trim().ToUpperInvariant() },
+                new SqlParameter("@MaLop", SqlDbType.NChar, 8) { Value = (maLop ?? string.Empty).Trim().ToUpperInvariant() },
                 new SqlParameter("@Keyword", SqlDbType.NVarChar, 60) { Value = "%" + (keyword ?? string.Empty).Trim() + "%" }
             };
 
@@ -59,10 +60,10 @@ namespace TRAC_NGHIEM.DAL
             const string sql = @"
                 SELECT RTRIM(MASV) AS MASV, HO, TEN, (HO + N' ' + TEN) AS HOTEN, NGAYSINH, DIACHI, RTRIM(MALOP) AS MALOP
                 FROM dbo.SINHVIEN
-                WHERE DAXOA = 1 AND (@MaLop = N'' OR RTRIM(MALOP) = @MaLop)
+                WHERE DAXOA = 1 AND (RTRIM(@MaLop) = N'' OR RTRIM(MALOP) = RTRIM(@MaLop))
                 ORDER BY MASV ASC;";
 
-            SqlParameter param = new SqlParameter("@MaLop", SqlDbType.NVarChar, 10)
+            SqlParameter param = new SqlParameter("@MaLop", SqlDbType.NChar, 8)
             {
                 Value = (maLop ?? string.Empty).Trim().ToUpperInvariant()
             };
@@ -72,8 +73,6 @@ namespace TRAC_NGHIEM.DAL
 
         public void InsertSinhVien(SinhVien sv)
         {
-            string defaultPwdHash = SecurityHelper.HashPassword(SecurityHelper.DefaultStudentPasswordPlain);
-
             SqlParameter[] parameters = new SqlParameter[]
             {
                 new SqlParameter("@MaSV", SqlDbType.NChar, 8) { Value = sv.MaSV.Trim().ToUpperInvariant() },
@@ -82,7 +81,7 @@ namespace TRAC_NGHIEM.DAL
                 new SqlParameter("@NgaySinh", SqlDbType.DateTime) { Value = sv.NgaySinh.HasValue ? (object)sv.NgaySinh.Value : DBNull.Value },
                 new SqlParameter("@DiaChi", SqlDbType.NVarChar, 40) { Value = string.IsNullOrWhiteSpace(sv.DiaChi) ? (object)DBNull.Value : sv.DiaChi.Trim() },
                 new SqlParameter("@MaLop", SqlDbType.NChar, 8) { Value = sv.MaLop.Trim().ToUpperInvariant() },
-                new SqlParameter("@MatKhauMacDinh", SqlDbType.NVarChar, 100) { Value = defaultPwdHash }
+                new SqlParameter("@MatKhauMacDinh", SqlDbType.NVarChar, 100) { Value = SecurityHelper.DefaultStudentPasswordPlain }
             };
 
             DatabaseConnection.ExecuteNonQuery("dbo.sp_ThemSinhVien", CommandType.StoredProcedure, parameters);
@@ -125,22 +124,12 @@ namespace TRAC_NGHIEM.DAL
 
         public void HardDeleteSinhVienIfUnused(string maSV)
         {
-            const string sql = @"
-                IF NOT EXISTS (SELECT 1 FROM dbo.BANGDIEM WHERE RTRIM(MASV) = @MaSV)
-                BEGIN
-                    BEGIN TRANSACTION;
-                    DELETE FROM dbo.TAIKHOAN WHERE RTRIM(MASV) = @MaSV;
-                    DELETE FROM dbo.SINHVIEN WHERE RTRIM(MASV) = @MaSV;
-                    COMMIT TRANSACTION;
-                END";
-
-            SqlParameter param = new SqlParameter("@MaSV", SqlDbType.NVarChar, 10)
+            SqlParameter param = new SqlParameter("@MaSV", SqlDbType.NChar, 8)
             {
                 Value = maSV.Trim().ToUpperInvariant()
             };
 
-            DatabaseConnection.ExecuteNonQuery(sql, CommandType.Text, param);
+            DatabaseConnection.ExecuteNonQuery("dbo.sp_HoanTacThemSinhVien", CommandType.StoredProcedure, param);
         }
     }
 }
-

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Data;
 using System.Data.SqlClient;
 using TRAC_NGHIEM.Models;
@@ -6,41 +6,23 @@ using TRAC_NGHIEM.Models;
 namespace TRAC_NGHIEM.DAL
 {
     /// <summary>
-    /// Lớp truy cập dữ liệu Giáo viên (Bảng GIAOVIEN & View vw_DanhSachGiaoVien)
+    /// Lớp truy cập dữ liệu Giáo viên (Bảng GIAOVIEN & các Stored Procedure đã ký Certificate)
     /// </summary>
     public class GiaoVienDAL
     {
         public DataTable GetAllGiaoVien()
         {
-            const string sql = @"
-                SELECT MAGV, HO, TEN, HOTEN, SODTLL, DIACHI,
-                       ISNULL(TENDANGNHAP, N'(Chưa cấp TK)') AS TENDANGNHAP,
-                       CO_TAI_KHOAN, SO_CAU_DA_SOAN, SO_LICH_DANG_KY
-                FROM dbo.vw_DanhSachGiaoVien
-                ORDER BY MAGV ASC;";
-            return DatabaseConnection.ExecuteQuery(sql, CommandType.Text);
+            return DatabaseConnection.ExecuteQuery("dbo.sp_LayDanhSachGiaoVien", CommandType.StoredProcedure);
         }
 
         public DataTable SearchGiaoVien(string keyword)
         {
-            const string sql = @"
-                SELECT MAGV, HO, TEN, HOTEN, SODTLL, DIACHI,
-                       ISNULL(TENDANGNHAP, N'(Chưa cấp TK)') AS TENDANGNHAP,
-                       CO_TAI_KHOAN, SO_CAU_DA_SOAN, SO_LICH_DANG_KY
-                FROM dbo.vw_DanhSachGiaoVien
-                WHERE MAGV LIKE @Keyword
-                   OR HO LIKE @Keyword
-                   OR TEN LIKE @Keyword
-                   OR HOTEN LIKE @Keyword
-                   OR SODTLL LIKE @Keyword
-                ORDER BY MAGV ASC;";
-
             SqlParameter param = new SqlParameter("@Keyword", SqlDbType.NVarChar, 60)
             {
-                Value = "%" + (keyword ?? string.Empty).Trim() + "%"
+                Value = (keyword ?? string.Empty).Trim()
             };
 
-            return DatabaseConnection.ExecuteQuery(sql, CommandType.Text, param);
+            return DatabaseConnection.ExecuteQuery("dbo.sp_TimKiemGiaoVien", CommandType.StoredProcedure, param);
         }
 
         public void InsertGiaoVien(GiaoVien gv)
@@ -82,4 +64,3 @@ namespace TRAC_NGHIEM.DAL
         }
     }
 }
-

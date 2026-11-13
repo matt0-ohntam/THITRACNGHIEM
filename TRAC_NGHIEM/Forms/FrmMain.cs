@@ -2,6 +2,7 @@ using System;
 using System.Data;
 using System.Data.SqlClient;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 using TRAC_NGHIEM.BLL;
 using TRAC_NGHIEM.DAL;
@@ -12,7 +13,7 @@ namespace TRAC_NGHIEM.Forms
 {
     /// <summary>
     /// Giao diện chính (Main Dashboard) của Hệ thống Quản lý Thi Trắc Nghiệm PTIT.
-    /// Tự động phân quyền giao diện và kiểm tra quyền nghiệp vụ giữa Giáo viên và Sinh viên.
+    /// Phân quyền theo SQL Server Login & Database Role (role_GiaoVien / role_SinhVien).
     /// </summary>
     public class FrmMain : Form
     {
@@ -122,10 +123,10 @@ namespace TRAC_NGHIEM.Forms
             btnGiaoVien = CreateSidebarButton("  3. Quản lý Giáo viên", topOffset);
             topOffset += btnHeight + gap;
 
-            btnTaoTaiKhoan = CreateSidebarButton("  4. Tạo tài khoản Giảng viên", topOffset);
+            btnTaoTaiKhoan = CreateSidebarButton("  4. Quản lý TK Giảng viên", topOffset);
             topOffset += btnHeight + gap;
 
-            btnDoiMatKhau = CreateSidebarButton("  5. Đổi mật khẩu", topOffset);
+            btnDoiMatKhau = CreateSidebarButton("  5. Đổi mật khẩu SQL Login", topOffset);
             topOffset += btnHeight + gap;
 
             btnBackupRestore = CreateSidebarButton("  6. Backup & Restore CSDL", topOffset);
@@ -181,8 +182,8 @@ namespace TRAC_NGHIEM.Forms
                 ForeColor = Color.FromArgb(100, 116, 139),
                 Anchor = AnchorStyles.Top | AnchorStyles.Right,
                 TextAlign = ContentAlignment.MiddleRight,
-                Location = new Point(520, 18),
-                Size = new Size(460, 26)
+                Location = new Point(460, 18),
+                Size = new Size(520, 26)
             };
 
             pnlTopBar.Controls.Add(lblCurrentPageTitle);
@@ -205,8 +206,8 @@ namespace TRAC_NGHIEM.Forms
             btnMonHoc.Click += (s, e) => NavigateToModule(btnMonHoc, "QUẢN LÝ MÔN HỌC");
             btnLopSinhVien.Click += (s, e) => NavigateToModule(btnLopSinhVien, "QUẢN LÝ LỚP VÀ SINH VIÊN (SUBFORM)");
             btnGiaoVien.Click += (s, e) => NavigateToModule(btnGiaoVien, "QUẢN LÝ GIÁO VIÊN");
-            btnTaoTaiKhoan.Click += (s, e) => NavigateToModule(btnTaoTaiKhoan, "TẠO TÀI KHOẢN GIẢNG VIÊN");
-            btnDoiMatKhau.Click += (s, e) => NavigateToModule(btnDoiMatKhau, "ĐỔI MẬT KHẨU GIẢNG VIÊN");
+            btnTaoTaiKhoan.Click += (s, e) => NavigateToModule(btnTaoTaiKhoan, "QUẢN LÝ TÀI KHOẢN GIẢNG VIÊN (SQL LOGIN)");
+            btnDoiMatKhau.Click += (s, e) => NavigateToModule(btnDoiMatKhau, "ĐỔI MẬT KHẨU TÀI KHOẢN SQL LOGIN");
             btnBackupRestore.Click += (s, e) => NavigateToModule(btnBackupRestore, "SAO LƯU & PHỤC HỒI CSDL (BACKUP / RESTORE)");
         }
 
@@ -257,7 +258,7 @@ namespace TRAC_NGHIEM.Forms
         }
 
         /// <summary>
-        /// Áp dụng phân quyền chặt chẽ dựa trên SessionManager.CurrentUser
+        /// Áp dụng phân quyền chặt chẽ dựa trên SQL Server Role (role_GiaoVien / role_SinhVien)
         /// </summary>
         private void ApplyRolePermissions()
         {
@@ -271,12 +272,12 @@ namespace TRAC_NGHIEM.Forms
             bool isGV = user.LaGiaoVien;
 
             lblUserNameInfo.Text = string.Format("{0}\n({1})", user.HoTen, user.MaNguoiDung);
-            lblUserRoleBadge.Text = isGV ? "QUYỀN: GIẢNG VIÊN (TOÀN QUYỀN)" : "QUYỀN: SINH VIÊN (THI & XEM ĐIỂM)";
+            lblUserRoleBadge.Text = isGV ? "ROLE: role_GiaoVien" : "ROLE: role_SinhVien";
             lblUserRoleBadge.BackColor = isGV ? Color.FromArgb(22, 101, 52) : Color.FromArgb(30, 64, 175);
 
             lblSessionDetails.Text = isGV
-                ? string.Format("Tài khoản: {0} | Mã GV: {1} | Vai trò: Giảng viên", user.TenDangNhap, user.MaGV)
-                : string.Format("Mã SV: {0} | Lớp: {1} ({2}) | Vai trò: Sinh viên", user.MaSV, user.MaLop, user.TenLop);
+                ? string.Format("SQL Login: {0} | DB User: {1} | Role: {2}", user.TenDangNhap, user.DbUserName, user.DatabaseRole)
+                : string.Format("SQL Login (MASV): {0} | Lớp: {1} | Role: {2}", user.MaSV, user.MaLop, user.DatabaseRole);
 
             // Ẩn và khóa toàn bộ chức năng Quản trị nếu là Sinh viên
             btnMonHoc.Visible = isGV;
@@ -334,9 +335,9 @@ namespace TRAC_NGHIEM.Forms
                 {
                     OpenChildForm(new FrmDoiMatKhau());
                 }
-                else
+                else if (clickedButton == btnBackupRestore)
                 {
-                    OpenChildForm(CreatePlaceholderModuleForm(title));
+                    OpenChildForm(new FrmBackupRestore());
                 }
             }
             catch (UnauthorizedAccessException authEx)
@@ -363,26 +364,11 @@ namespace TRAC_NGHIEM.Forms
             childForm.Show();
         }
 
-        private Form CreatePlaceholderModuleForm(string title)
-        {
-            Form frm = new Form { BackColor = Color.White };
-            Label lbl = new Label
-            {
-                Text = string.Format("Chức năng [{0}] đã sẵn sàng tầng BLL/DAL và sẽ được gắn giao diện ở Giai đoạn tiếp theo.", title),
-                Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
-                ForeColor = Color.FromArgb(51, 65, 85)
-            };
-            frm.Controls.Add(lbl);
-            return frm;
-        }
-
         public void ShowHomeDashboard()
         {
             HighlightActiveButton(btnTrangChu);
             lblCurrentPageTitle.Text = SessionManager.IsGiaoVien()
-                ? "TRANG CHỦ QUẢN TRỊ & DỮ LIỆU NỀN (GIẢNG VIÊN)"
+                ? "TRANG CHỦ TỔNG QUAN QUẢN TRỊ & TRẠNG THÁI SQL LOGIN (GIẢNG VIÊN)"
                 : "TRANG CHỦ CỔNG THÔNG TIN THI TRẮC NGHIỆM (SINH VIÊN)";
 
             Form dashboard = new Form
@@ -405,70 +391,226 @@ namespace TRAC_NGHIEM.Forms
         private void BuildGiaoVienDashboard(Form container)
         {
             BackupRestoreBLL statBLL = new BackupRestoreBLL();
-            DataTable dtStats = statBLL.LayThongKeDuLieuHienTai();
+            TaiKhoanBLL tkBLL = new TaiKhoanBLL();
 
+            DataTable dtStats = statBLL.LayThongKeDuLieuHienTai();
+            DataTable dtTeachers = tkBLL.LayDanhSachTaiKhoanGiaoVien();
+
+            int tongGiaoVien = dtTeachers != null ? dtTeachers.Rows.Count : 0;
+            int soDangHoatDong = 0;
+            int soDaVoHieuHoa = 0;
+            int soChuaTao = 0;
+
+            if (dtTeachers != null)
+            {
+                foreach (DataRow row in dtTeachers.Rows)
+                {
+                    string st = Convert.ToString(row["TRANGTHAI_TEXT"]).Trim();
+                    if (string.Equals(st, "Đang hoạt động", StringComparison.OrdinalIgnoreCase))
+                        soDangHoatDong++;
+                    else if (string.Equals(st, "Đã vô hiệu hóa", StringComparison.OrdinalIgnoreCase))
+                        soDaVoHieuHoa++;
+                    else
+                        soChuaTao++;
+                }
+            }
+
+            int soCoLogin = soDangHoatDong + soDaVoHieuHoa;
+
+            // 1. Header chào mừng + Nút Làm mới
             Panel pnlWelcome = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 115,
+                Height = 92,
                 BackColor = Color.White,
-                Padding = new Padding(22)
+                Padding = new Padding(18, 12, 18, 12)
             };
 
             Label lblWelcomeTitle = new Label
             {
-                Text = string.Format("Xin chào Giảng viên: {0} (Mã GV: {1})",
-                    SessionManager.CurrentUser.HoTen, SessionManager.CurrentUser.MaGV),
-                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+                Text = string.Format("Xin chào Giảng viên: {0} (MAGV / SQL Login: {1} | Role: {2})",
+                    SessionManager.CurrentUser.HoTen,
+                    SessionManager.CurrentUser.MaGV,
+                    SessionManager.CurrentUser.DatabaseRole),
+                Font = new Font("Segoe UI", 13F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(185, 28, 28),
-                Location = new Point(20, 18),
+                Location = new Point(18, 12),
                 AutoSize = true
             };
 
             Label lblWelcomeDesc = new Label
             {
-                Text = "Bạn đang đăng nhập với quyền GIẢNG VIÊN. Bạn có toàn quyền quản lý Môn học, Lớp, Sinh viên, Giáo viên, " +
-                       "Tạo tài khoản giảng viên, Đổi mật khẩu và Sao lưu / Phục hồi cơ sở dữ liệu TRAC_NGHIEM.",
-                Font = new Font("Segoe UI", 10F, FontStyle.Regular),
+                Text = "Số liệu Tổng quan bên dưới được đối chiếu trực tiếp từ bảng GIAOVIEN kết hợp sys.server_principals, sys.database_principals và role_GiaoVien.",
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(71, 85, 105),
-                Location = new Point(20, 54),
-                Size = new Size(920, 45)
+                Location = new Point(18, 46),
+                Size = new Size(680, 34)
             };
+
+            Button btnRefreshOverview = new Button
+            {
+                Text = "Làm mới Tổng quan",
+                Size = new Size(155, 36),
+                Location = new Point(710, 26),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                BackColor = Color.FromArgb(37, 99, 235),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnRefreshOverview.FlatAppearance.BorderSize = 0;
+            btnRefreshOverview.Click += (s, e) => ShowHomeDashboard();
+
+            Button btnOpenAccountMgr = new Button
+            {
+                Text = "Mở Quản lý TK Login",
+                Size = new Size(165, 36),
+                Location = new Point(875, 26),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                BackColor = Color.FromArgb(22, 163, 74),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnOpenAccountMgr.FlatAppearance.BorderSize = 0;
+            btnOpenAccountMgr.Click += (s, e) => NavigateToModule(btnTaoTaiKhoan, "QUẢN LÝ TÀI KHOẢN GIẢNG VIÊN (SQL LOGIN)");
 
             pnlWelcome.Controls.Add(lblWelcomeTitle);
             pnlWelcome.Controls.Add(lblWelcomeDesc);
+            pnlWelcome.Controls.Add(btnRefreshOverview);
+            pnlWelcome.Controls.Add(btnOpenAccountMgr);
+
+            // 2. Hàng 5 thẻ số liệu Tổng quan Giáo viên & SQL Login (Theo đúng Mục VII)
+            TableLayoutPanel tblCards = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 96,
+                ColumnCount = 5,
+                RowCount = 1,
+                Padding = new Padding(0, 8, 0, 8)
+            };
+            for (int i = 0; i < 5; i++)
+            {
+                tblCards.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
+            }
+            tblCards.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+            tblCards.Controls.Add(CreateMetricCard("1. Tổng số giáo viên", tongGiaoVien.ToString(), "Bảng GIAOVIEN", Color.FromArgb(30, 41, 59)), 0, 0);
+            tblCards.Controls.Add(CreateMetricCard("2. Số GV có SQL Login", soCoLogin.ToString(), "sys.server_principals", Color.FromArgb(37, 99, 235)), 1, 0);
+            tblCards.Controls.Add(CreateMetricCard("3. Login đang hoạt động", soDangHoatDong.ToString(), "is_disabled = 0", Color.FromArgb(22, 163, 74)), 2, 0);
+            tblCards.Controls.Add(CreateMetricCard("4. Login đã vô hiệu hóa", soDaVoHieuHoa.ToString(), "is_disabled = 1", Color.FromArgb(220, 38, 38)), 3, 0);
+            tblCards.Controls.Add(CreateMetricCard("5. GV chưa cấp Login", soChuaTao.ToString(), "Chưa có SQL Login", Color.FromArgb(217, 119, 6)), 4, 0);
+
+            // 3. Khu vực 2 bảng đối chiếu chi tiết
+            SplitContainer splitOverview = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Horizontal,
+                SplitterDistance = 215
+            };
+
+            GroupBox grpTeacherLogins = new GroupBox
+            {
+                Text = "Danh sách đối chiếu Giáo viên & SQL Server Login (Bao gồm GV-8-4)",
+                Dock = DockStyle.Fill,
+                BackColor = Color.White,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(30, 41, 59),
+                Padding = new Padding(10)
+            };
+
+            DataGridView dgvTeacherLogins = CreateReadOnlyGrid();
+            dgvTeacherLogins.DataSource = dtTeachers;
+            dgvTeacherLogins.DataBindingComplete += (s, e) =>
+            {
+                if (dgvTeacherLogins.Columns.Contains("MAGV"))
+                    dgvTeacherLogins.Columns["MAGV"].HeaderText = "MAGV";
+                if (dgvTeacherLogins.Columns.Contains("HO"))
+                    dgvTeacherLogins.Columns["HO"].HeaderText = "HO (Họ đệm)";
+                if (dgvTeacherLogins.Columns.Contains("TEN"))
+                    dgvTeacherLogins.Columns["TEN"].HeaderText = "TEN (Tên)";
+                if (dgvTeacherLogins.Columns.Contains("TENDANGNHAP"))
+                    dgvTeacherLogins.Columns["TENDANGNHAP"].HeaderText = "Username (SQL Login)";
+                if (dgvTeacherLogins.Columns.Contains("TRANGTHAI_TEXT"))
+                    dgvTeacherLogins.Columns["TRANGTHAI_TEXT"].HeaderText = "Trạng thái Login";
+                if (dgvTeacherLogins.Columns.Contains("HANHDONG_TEXT"))
+                    dgvTeacherLogins.Columns["HANHDONG_TEXT"].HeaderText = "Hành động tương ứng";
+
+                string[] hiddenCols = { "HOTEN_GV", "TRANGTHAI_CODE", "CO_LOGIN", "CO_DB_USER", "THUOC_ROLE_GV", "IS_DISABLED", "NGAYTAO" };
+                foreach (string col in hiddenCols)
+                {
+                    if (dgvTeacherLogins.Columns.Contains(col))
+                    {
+                        dgvTeacherLogins.Columns[col].Visible = false;
+                    }
+                }
+            };
+            grpTeacherLogins.Controls.Add(dgvTeacherLogins);
+            splitOverview.Panel1.Controls.Add(grpTeacherLogins);
 
             GroupBox grpStats = new GroupBox
             {
-                Text = "Thống kê trực tiếp dữ liệu nền trong SQL Server (Database: TRAC_NGHIEM)",
+                Text = "Thống kê tổng hợp toàn bộ dữ liệu nền trong SQL Server (Database: TRAC_NGHIEM)",
                 Dock = DockStyle.Fill,
-                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
+                BackColor = Color.White,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(30, 41, 59),
-                Padding = new Padding(15)
+                Padding = new Padding(10)
             };
 
-            DataGridView dgvStats = new DataGridView
+            DataGridView dgvStats = CreateReadOnlyGrid();
+            dgvStats.DataSource = dtStats;
+            grpStats.Controls.Add(dgvStats);
+            splitOverview.Panel2.Controls.Add(grpStats);
+
+            container.Controls.Add(splitOverview);
+            container.Controls.Add(tblCards);
+            container.Controls.Add(pnlWelcome);
+        }
+
+        private Panel CreateMetricCard(string title, string numberText, string subtitle, Color accentColor)
+        {
+            Panel card = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackgroundColor = Color.White,
-                BorderStyle = BorderStyle.None,
-                ReadOnly = true,
-                AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                RowHeadersVisible = false,
-                Font = new Font("Segoe UI", 10F, FontStyle.Regular)
+                BackColor = Color.White,
+                Margin = new Padding(4, 0, 4, 0),
+                Padding = new Padding(10, 6, 10, 6)
             };
-            dgvStats.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-            dgvStats.RowTemplate.Height = 34;
-            dgvStats.DataSource = dtStats;
 
-            grpStats.Controls.Add(dgvStats);
+            Label lblTitle = new Label
+            {
+                Text = title,
+                Font = new Font("Segoe UI", 8.8F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(71, 85, 105),
+                Location = new Point(10, 6),
+                AutoSize = true
+            };
 
-            container.Controls.Add(grpStats);
-            container.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 16 });
-            container.Controls.Add(pnlWelcome);
+            Label lblValue = new Label
+            {
+                Text = numberText,
+                Font = new Font("Segoe UI", 17F, FontStyle.Bold),
+                ForeColor = accentColor,
+                Location = new Point(10, 26),
+                AutoSize = true
+            };
+
+            Label lblSub = new Label
+            {
+                Text = subtitle,
+                Font = new Font("Segoe UI", 8F, FontStyle.Italic),
+                ForeColor = Color.FromArgb(100, 116, 139),
+                Location = new Point(10, 58),
+                AutoSize = true
+            };
+
+            card.Controls.Add(lblTitle);
+            card.Controls.Add(lblValue);
+            card.Controls.Add(lblSub);
+            return card;
         }
 
         private void BuildSinhVienDashboard(Form container)
@@ -485,7 +627,7 @@ namespace TRAC_NGHIEM.Forms
 
             Label lblSvHeader = new Label
             {
-                Text = string.Format("Sinh viên: {0}  |  Mã SV (Login): {1}  |  Lớp: {2} - {3}",
+                Text = string.Format("Sinh viên: {0}  |  SQL Login (MASV): {1}  |  Lớp: {2} - {3}",
                     sv.HoTen, sv.MaSV, sv.MaLop, sv.TenLop),
                 Font = new Font("Segoe UI", 13F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(30, 64, 175),
@@ -495,8 +637,8 @@ namespace TRAC_NGHIEM.Forms
 
             Label lblSvNote = new Label
             {
-                Text = "Phân quyền bảo mật: Tài khoản Sinh viên chỉ được phép xem lịch thi của lớp mình và xem điểm thi của chính bản thân.\n" +
-                       "Toàn bộ chức năng Quản trị dữ liệu nền (Môn học, Lớp, Sinh viên, Giáo viên, Tạo tài khoản, Backup/Restore) đã được khóa.",
+                Text = "Phân quyền bảo mật (SQL Role: role_SinhVien): Tài khoản Sinh viên chỉ được phép xem lịch thi của lớp mình và kết quả điểm thi cá nhân.\n" +
+                       "Toàn bộ chức năng Quản trị dữ liệu nền (Môn học, Lớp, Sinh viên, Giáo viên, Quản lý Login, Backup/Restore) bị chặn ở cả giao diện C# và SQL Server.",
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(71, 85, 105),
                 Location = new Point(20, 52),
@@ -513,7 +655,7 @@ namespace TRAC_NGHIEM.Forms
                 SplitterDistance = 210
             };
 
-            // Khu vực 1: Lịch thi của lớp sinh viên
+            // Khu vực 1: Lịch thi của lớp sinh viên (Stored Procedure)
             GroupBox grpLichThi = new GroupBox
             {
                 Text = string.Format("Lịch thi trắc nghiệm đã đăng ký cho lớp [{0}]", sv.MaLop),
@@ -522,43 +664,26 @@ namespace TRAC_NGHIEM.Forms
             };
 
             DataGridView dgvLichThi = CreateReadOnlyGrid();
-            const string sqlLichThi = @"
-                SELECT RTRIM(dk.MAMH) AS [Mã MH], mh.TENMH AS [Tên môn học],
-                       dk.LAN AS [Lần thi], dk.TRINHDO AS [Trình độ],
-                       dk.SOCAUTHI AS [Số câu], dk.THOIGIAN AS [Thời gian (phút)],
-                       dk.NGAYTHI AS [Ngày thi]
-                FROM dbo.GIAOVIEN_DANGKY dk
-                INNER JOIN dbo.MONHOC mh ON dk.MAMH = mh.MAMH
-                WHERE RTRIM(dk.MALOP) = @MaLop
-                ORDER BY dk.NGAYTHI DESC;";
             dgvLichThi.DataSource = DatabaseConnection.ExecuteQuery(
-                sqlLichThi,
-                CommandType.Text,
-                new SqlParameter("@MaLop", SqlDbType.NVarChar, 10) { Value = sv.MaLop });
+                "dbo.sp_LayLichThiSinhVien",
+                CommandType.StoredProcedure,
+                new SqlParameter("@MaLop", SqlDbType.NChar, 8) { Value = sv.MaLop });
             grpLichThi.Controls.Add(dgvLichThi);
             split.Panel1.Controls.Add(grpLichThi);
 
-            // Khu vực 2: Kết quả điểm thi của riêng sinh viên đang đăng nhập
+            // Khu vực 2: Kết quả điểm thi của riêng sinh viên đang đăng nhập (Stored Procedure kiểm tra SUSER_SNAME())
             GroupBox grpKetQua = new GroupBox
             {
-                Text = string.Format("Kết quả điểm thi cá nhân của sinh viên [{0} - {1}] (Không hiển thị điểm của SV khác)", sv.MaSV, sv.HoTen),
+                Text = string.Format("Kết quả điểm thi cá nhân của sinh viên [{0} - {1}] (Đối chiếu SUSER_SNAME() = MASV)", sv.MaSV, sv.HoTen),
                 Dock = DockStyle.Fill,
                 Font = new Font("Segoe UI", 10F, FontStyle.Bold)
             };
 
             DataGridView dgvDiem = CreateReadOnlyGrid();
-            const string sqlDiem = @"
-                SELECT RTRIM(bd.MAMH) AS [Mã MH], mh.TENMH AS [Tên môn học],
-                       bd.LAN AS [Lần thi], bd.NGAYTHI AS [Ngày thi],
-                       bd.DIEM AS [Điểm số], bd.BAITHI AS [Chi tiết bài làm]
-                FROM dbo.BANGDIEM bd
-                INNER JOIN dbo.MONHOC mh ON bd.MAMH = mh.MAMH
-                WHERE RTRIM(bd.MASV) = @MaSV
-                ORDER BY bd.NGAYTHI DESC;";
             dgvDiem.DataSource = DatabaseConnection.ExecuteQuery(
-                sqlDiem,
-                CommandType.Text,
-                new SqlParameter("@MaSV", SqlDbType.NVarChar, 10) { Value = sv.MaSV });
+                "dbo.sp_LayKetQuaThiCaNhan",
+                CommandType.StoredProcedure,
+                new SqlParameter("@MaSV", SqlDbType.NChar, 8) { Value = sv.MaSV });
             grpKetQua.Controls.Add(dgvDiem);
             split.Panel2.Controls.Add(grpKetQua);
 
@@ -610,4 +735,3 @@ namespace TRAC_NGHIEM.Forms
         public Button BtnBackupRestore { get { return btnBackupRestore; } }
     }
 }
-

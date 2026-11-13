@@ -358,7 +358,11 @@ namespace TRAC_NGHIEM.Forms
             if (dgvGiaoVien.Columns.Contains("DIACHI"))
                 dgvGiaoVien.Columns["DIACHI"].HeaderText = "Địa chỉ / Bộ môn";
             if (dgvGiaoVien.Columns.Contains("TENDANGNHAP"))
-                dgvGiaoVien.Columns["TENDANGNHAP"].HeaderText = "Tài khoản";
+                dgvGiaoVien.Columns["TENDANGNHAP"].HeaderText = "Username (SQL Login)";
+            if (dgvGiaoVien.Columns.Contains("TRANGTHAI_MOTA"))
+                dgvGiaoVien.Columns["TRANGTHAI_MOTA"].HeaderText = "Trạng thái Login";
+            if (dgvGiaoVien.Columns.Contains("TRANGTHAI_LOGIN"))
+                dgvGiaoVien.Columns["TRANGTHAI_LOGIN"].Visible = false;
             if (dgvGiaoVien.Columns.Contains("CO_TAI_KHOAN"))
                 dgvGiaoVien.Columns["CO_TAI_KHOAN"].Visible = false;
             if (dgvGiaoVien.Columns.Contains("SO_CAU_DA_SOAN"))
