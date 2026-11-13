@@ -15,14 +15,16 @@
 [PASS] TC06 - Chặn sinh viên truy cập chức năng quản trị ở cả C# và SQL Role | Từ chối truy cập: Tài khoản SQL Login [SV001] thuộc role_SinhVien, không có quyền thực hiện chức năng [Thêm môn học]!
 [PASS] TC16 - Chặn SQL Injection tại màn hình Đăng nhập | Tất cả payload đều bị từ chối
 [PASS] TC17 - Chặn SQL Injection tại ô Tìm kiếm (Không lộ dữ liệu, không lỗi cú pháp) | An toàn tuyệt đối
-[PASS] TC18 - Kiểm tra khởi tạo và thao tác các nút bấm trên toàn bộ Form | Tất cả Form (FrmMain, FrmMonHoc, FrmLopSinhVien, FrmGiaoVien, FrmTaoTaiKhoan, FrmDoiMatKhau, FrmBackupRestore) và các nút chức năng hoạt động chính xác.
+[PASS] TC18 - Kiểm tra khởi tạo và thao tác các nút bấm trên toàn bộ Form | Tất cả 9 Form (FrmMain, FrmMonHoc, FrmLopSinhVien, FrmGiaoVien, FrmTaoTaiKhoan, FrmDoiMatKhau, FrmBackupRestore, FrmXemKetQua, FrmBangDiemMonHoc) và các nút chức năng hoạt động chính xác.
 [PASS] TC19 - Sao lưu (Full Backup) CSDL TRAC_NGHIEM bằng quyền GV001 (role_GiaoVien) | Sao lưu (Backup) cơ sở dữ liệu [TRAC_NGHIEM] thành công! Đường dẫn file: C:\THITRACNGHIEM\backup\TRAC_NGHIEM_Full.bak
 [PASS] TC20 - Chặn đường dẫn Backup sai & từ chối file không phải định dạng .bak | File sao lưu (.bak) KHÔNG hợp lệ hoặc bị hỏng: The volume on device 'C:\THITRACNGHIEM\DATABASE_CONTRACT.md' is empty.
 VERIFY DATABASE is terminating abnormally.
 The volume on device 'C:\THITRACNGHIEM\DATABASE_CONTRACT.md' is empty.
 RESTORE HEADERONLY is terminating abnormally.
-[PASS] TC21 - Kiểm tra file .bak hợp lệ bằng RESTORE VERIFYONLY & HEADERONLY | File hợp lệ | DB: TRAC_NGHIEM | Máy chủ: LAPTOP-AEK7186T | Ngày sao lưu: 11/13/2026 12:08:42 PM
+[PASS] TC21 - Kiểm tra file .bak hợp lệ bằng RESTORE VERIFYONLY & HEADERONLY | File hợp lệ | DB: TRAC_NGHIEM | Máy chủ: LAPTOP-AEK7186T | Ngày sao lưu: 11/13/2026 3:06:43 PM
 [PASS] TC22 - Phục hồi (Restore) CSDL TRAC_NGHIEM an toàn & kiểm tra dữ liệu sau phục hồi | Phục hồi (Restore) cơ sở dữ liệu [TRAC_NGHIEM] thành công và đã kết nối lại an toàn!
+[PASS] TC23 - Mục 7b: Xem kết quả (In lại 10 câu đã thi) & Chặn SV xem bài của người khác | Từ chối truy cập: Sinh viên chỉ được phép xem và in lại các câu đã thi của chính mình!
+[PASS] TC24 - Mục 8: Bảng điểm môn học (Report lớp CNTT01 - CSDL) & Chặn quyền Sinh viên | Đã kết xuất Bảng điểm môn [CSDL] - Lớp [CNTT01] - Lần thi [1] (3 sinh viên).
 ==================================================================
-KẾT QUẢ TỔNG HỢP: 22/22 TEST CASE (GỒM BACKUP & RESTORE) ĐẠT 100% (PASS)
+KẾT QUẢ TỔNG HỢP: 24/24 TEST CASE (GỒM 7b, 8 & BACKUP/RESTORE) ĐẠT 100% (PASS)
 ==================================================================

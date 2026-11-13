@@ -1,6 +1,7 @@
 using System;
 using System.Data;
 using System.Drawing;
+using System.Reflection;
 using System.Windows.Forms;
 using TRAC_NGHIEM.BLL;
 using TRAC_NGHIEM.Helpers;
@@ -9,19 +10,18 @@ namespace TRAC_NGHIEM.Forms
 {
     /// <summary>
     /// Form Quản lý Tài khoản Giáo viên bằng SQL Server Login, Database User và role_GiaoVien.
-    /// Đáp ứng đầy đủ mục V & VI:
-    /// - Tạo tài khoản SQL Login mới cho giáo viên chưa có Login (Username mặc định = MAGV).
-    /// - Hiển thị danh sách giáo viên từ GIAOVIEN + sys.server_principals + sys.database_principals + role_GiaoVien:
-    ///   (MAGV, HO, TEN, Username, Trạng thái: Chưa tạo / Đang hoạt động / Đã vô hiệu hóa, Hành động: Tạo tài khoản / Thu hồi / Kích hoạt lại).
-    /// - Nút ngữ cảnh tự động thay đổi theo trạng thái của dòng giáo viên đang chọn:
-    ///   + Chưa có Login -> Hiển thị nút [Tạo tài khoản]
-    ///   + Đang hoạt động -> Hiển thị nút [Thu hồi tài khoản] (ALTER LOGIN ... DISABLE)
-    ///   + Đã bị vô hiệu hóa -> Hiển thị nút [Kích hoạt lại tài khoản] (ALTER LOGIN ... ENABLE)
+    /// - ComboBox "Chọn Giáo viên" hiển thị TẤT CẢ giáo viên kèm trạng thái.
+    /// - Chuyển đổi tức thời (0ms, không giật/nhảy lại dòng cũ) khi chọn trong ComboBox hoặc click trên bảng.
+    /// - Khi chọn giáo viên chưa có tài khoản -> Nút hành động chính là [TẠO TÀI KHOẢN] (Xanh lá).
+    /// - Khi chọn giáo viên đã tạo tài khoản (Đang hoạt động) -> Nút hành động chính tự động chuyển thành [THU HỒI TÀI KHOẢN] (Đỏ).
+    /// - Khi chọn giáo viên đã bị thu hồi (Đã vô hiệu hóa) -> Nút hành động chính tự động chuyển thành [KÍCH HOẠT LẠI] (Xanh dương).
     /// </summary>
     public class FrmTaoTaiKhoan : Form
     {
         private readonly TaiKhoanBLL _bll = new TaiKhoanBLL();
         private bool _isBusy = false;
+        private bool _isSyncingSelection = false;
+        private int _currentSelectedStatusCode = 0;
 
         private SplitContainer splitLayout;
         private GroupBox grpCreateAccount;
@@ -49,6 +49,7 @@ namespace TRAC_NGHIEM.Forms
         public FrmTaoTaiKhoan()
         {
             SessionManager.EnsureGiaoVienPermission("Quản lý tài khoản SQL Server Login của Giáo viên");
+            this.DoubleBuffered = true;
             InitializeComponent();
             LoadData();
         }
@@ -67,18 +68,18 @@ namespace TRAC_NGHIEM.Forms
                 SplitterWidth = 8
             };
 
-            // 1. Khung bên trái: Form tạo SQL Server Login cho giảng viên chưa có tài khoản
+            // 1. Khung bên trái: Chọn bất kỳ Giáo viên nào để Tạo / Thu hồi / Kích hoạt lại SQL Login
             grpCreateAccount = new GroupBox
             {
-                Text = "Tạo tài khoản SQL Server Login cho Giáo viên",
+                Text = "Tạo / Thu hồi SQL Server Login cho Giáo viên",
                 Dock = DockStyle.Fill,
                 BackColor = Color.White,
                 Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(185, 28, 28),
-                Padding = new Padding(16)
+                Padding = new Padding(16, 26, 16, 16)
             };
 
-            lblChonGV = CreateFieldLabel("1. Chọn Giáo viên (chưa có SQL Login):", 18, 34);
+            lblChonGV = CreateFieldLabel("1. Chọn Giáo viên (Tất cả giảng viên):", 18, 34);
             cboGiangVien = new ComboBox
             {
                 Location = new Point(18, 58),
@@ -146,7 +147,7 @@ namespace TRAC_NGHIEM.Forms
                 Cursor = Cursors.Hand
             };
             btnTaoTaiKhoan.FlatAppearance.BorderSize = 0;
-            btnTaoTaiKhoan.Click += BtnTaoTaiKhoan_Click;
+            btnTaoTaiKhoan.Click += BtnMainAction_Click;
 
             btnLamMoi = new Button
             {
@@ -167,9 +168,10 @@ namespace TRAC_NGHIEM.Forms
                 Text = "Cơ chế Bảo mật SQL Server:\n" +
                        "• Tạo trực tiếp SQL Server Login & Database User (Không lưu bảng TAIKHOAN).\n" +
                        "• Username luôn bằng MAGV và được gán vào role_GiaoVien.\n" +
-                       "• Thực thi qua Stored Procedure ký chứng thư số (Certificate Signing), không dùng tài khoản sa.",
-                Location = new Point(18, 402),
-                Size = new Size(350, 130),
+                       "• Chọn GV chưa có tài khoản -> Nút [TẠO TÀI KHOẢN].\n" +
+                       "• Chọn GV đã có tài khoản -> Nút tự chuyển sang [THU HỒI TÀI KHOẢN].",
+                Location = new Point(18, 400),
+                Size = new Size(350, 140),
                 Font = new Font("Segoe UI", 9F, FontStyle.Italic),
                 ForeColor = Color.FromArgb(71, 85, 105)
             };
@@ -183,30 +185,31 @@ namespace TRAC_NGHIEM.Forms
 
             splitLayout.Panel1.Controls.Add(grpCreateAccount);
 
-            // 2. Khung bên phải: Danh sách Giáo viên & Trạng thái SQL Server Login (Tạo / Thu hồi / Kích hoạt lại)
+            // 2. Khung bên phải: Danh sách Giáo viên & Trạng thái SQL Server Login
             grpExistingAccounts = new GroupBox
             {
-                Text = "Danh sách Giáo viên & Trạng thái SQL Server Login (sys.server_principals + role_GiaoVien)",
+                Text = "Danh sách Giáo viên & Trạng thái SQL Server Login",
                 Dock = DockStyle.Fill,
                 BackColor = Color.White,
                 Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(30, 41, 59),
-                Padding = new Padding(12)
+                Padding = new Padding(12, 28, 12, 12)
             };
 
             pnlGridActions = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 54,
+                Height = 52,
                 BackColor = Color.FromArgb(248, 250, 252),
-                Padding = new Padding(8, 6, 8, 6)
+                Padding = new Padding(10, 6, 10, 6)
             };
 
             lblSelectedTeacherStatus = new Label
             {
                 Text = "Chọn một giáo viên trên bảng để thực hiện hành động tương ứng.",
-                Location = new Point(10, 15),
-                Size = new Size(330, 24),
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                AutoEllipsis = true,
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(30, 64, 175)
             };
@@ -215,7 +218,7 @@ namespace TRAC_NGHIEM.Forms
             {
                 Text = "Tạo tài khoản",
                 Dock = DockStyle.Right,
-                Width = 220,
+                Width = 175,
                 BackColor = Color.FromArgb(22, 163, 74),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
@@ -230,7 +233,7 @@ namespace TRAC_NGHIEM.Forms
             {
                 Text = "Thu hồi tài khoản",
                 Dock = DockStyle.Right,
-                Width = 220,
+                Width = 175,
                 BackColor = Color.FromArgb(220, 38, 38),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
@@ -245,7 +248,7 @@ namespace TRAC_NGHIEM.Forms
             {
                 Text = "Kích hoạt lại tài khoản",
                 Dock = DockStyle.Right,
-                Width = 240,
+                Width = 190,
                 BackColor = Color.FromArgb(37, 99, 235),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
@@ -276,6 +279,7 @@ namespace TRAC_NGHIEM.Forms
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(15, 23, 42)
             };
+            EnableDoubleBuffer(dgvTaiKhoanGV);
             dgvTaiKhoanGV.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
             dgvTaiKhoanGV.RowTemplate.Height = 32;
             dgvTaiKhoanGV.SelectionChanged += DgvTaiKhoanGV_SelectionChanged;
@@ -285,6 +289,15 @@ namespace TRAC_NGHIEM.Forms
             splitLayout.Panel2.Controls.Add(grpExistingAccounts);
 
             this.Controls.Add(splitLayout);
+        }
+
+        private static void EnableDoubleBuffer(Control ctrl)
+        {
+            PropertyInfo prop = typeof(Control).GetProperty("DoubleBuffered", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (prop != null)
+            {
+                prop.SetValue(ctrl, true, null);
+            }
         }
 
         private Label CreateFieldLabel(string text, int x, int y)
@@ -304,35 +317,51 @@ namespace TRAC_NGHIEM.Forms
             txtPassword.Clear();
             txtConfirmPassword.Clear();
 
-            DataTable dtGVChuaCoTK = _bll.LayGiaoVienChuaCoTaiKhoan();
-            cboGiangVien.DataSource = dtGVChuaCoTK;
-            cboGiangVien.DisplayMember = "HIENTHI";
-            cboGiangVien.ValueMember = "MAGV";
-
-            if (dtGVChuaCoTK.Rows.Count > 0)
-            {
-                cboGiangVien.Enabled = true;
-                btnTaoTaiKhoan.Enabled = true;
-                CboGiangVien_SelectedIndexChanged(null, EventArgs.Empty);
-            }
-            else
-            {
-                cboGiangVien.Enabled = false;
-                btnTaoTaiKhoan.Enabled = false;
-                txtUsername.Clear();
-            }
-
             DataTable dtAccounts = _bll.LayDanhSachTaiKhoanGiaoVien();
-            dgvTaiKhoanGV.DataSource = dtAccounts;
-
-            ConfigureGridColumns();
-
-            if (!string.IsNullOrEmpty(selectMaGV))
+            if (dtAccounts != null)
             {
-                SelectTeacherRow(selectMaGV);
+                if (!dtAccounts.Columns.Contains("HIENTHI_ALL"))
+                {
+                    dtAccounts.Columns.Add("HIENTHI_ALL", typeof(string));
+                }
+
+                foreach (DataRow r in dtAccounts.Rows)
+                {
+                    string ma = Convert.ToString(r["MAGV"]).Trim();
+                    string ho = Convert.ToString(r["HO"]).Trim();
+                    string ten = Convert.ToString(r["TEN"]).Trim();
+                    string st = Convert.ToString(r["TRANGTHAI_TEXT"]).Trim();
+                    r["MAGV"] = ma; // Chuẩn hóa bỏ khoảng trắng thừa của NCHAR(8) để SelectedValue khớp 100%
+                    r["HIENTHI_ALL"] = string.Format("{0} - {1} {2} ({3})", ma, ho, ten, st);
+                }
             }
 
-            DgvTaiKhoanGV_SelectionChanged(null, EventArgs.Empty);
+            _isSyncingSelection = true;
+            try
+            {
+                dgvTaiKhoanGV.DataSource = dtAccounts;
+                ConfigureGridColumns();
+
+                cboGiangVien.DataSource = dtAccounts != null ? dtAccounts.Copy() : null;
+                cboGiangVien.DisplayMember = "HIENTHI_ALL";
+                cboGiangVien.ValueMember = "MAGV";
+                cboGiangVien.Enabled = dtAccounts != null && dtAccounts.Rows.Count > 0;
+            }
+            finally
+            {
+                _isSyncingSelection = false;
+            }
+
+            string targetMaGV = selectMaGV;
+            if (string.IsNullOrEmpty(targetMaGV) && dtAccounts != null && dtAccounts.Rows.Count > 0)
+            {
+                targetMaGV = Convert.ToString(dtAccounts.Rows[0]["MAGV"]).Trim();
+            }
+
+            if (!string.IsNullOrEmpty(targetMaGV))
+            {
+                SyncSelectionByMaGV(targetMaGV, true, true);
+            }
         }
 
         private void ConfigureGridColumns()
@@ -352,8 +381,7 @@ namespace TRAC_NGHIEM.Forms
             if (dgvTaiKhoanGV.Columns.Contains("HANHDONG_TEXT"))
                 dgvTaiKhoanGV.Columns["HANHDONG_TEXT"].HeaderText = "Hành động";
 
-            // Ẩn các cột kỹ thuật phụ trợ
-            string[] hiddenCols = { "TRANGTHAI_CODE", "CO_LOGIN", "CO_DB_USER", "THUOC_ROLE_GV", "IS_DISABLED", "NGAYTAO" };
+            string[] hiddenCols = { "TRANGTHAI_CODE", "CO_LOGIN", "CO_DB_USER", "THUOC_ROLE_GV", "IS_DISABLED", "NGAYTAO", "HIENTHI_ALL" };
             foreach (string col in hiddenCols)
             {
                 if (dgvTaiKhoanGV.Columns.Contains(col))
@@ -363,26 +391,31 @@ namespace TRAC_NGHIEM.Forms
             }
         }
 
+        /// <summary>
+        /// Khi người dùng chọn một giáo viên trong ComboBox:
+        /// Lấy trực tiếp dữ liệu từ dòng đang chọn trong ComboBox và cập nhật giao diện ngay lập tức,
+        /// đồng thời đánh dấu dòng tương ứng trên DataGridView trong chế độ khóa sự kiện (_isSyncingSelection = true)
+        /// để tránh việc DataGridView bắn ngược sự kiện làm giật/nhảy lại dòng cũ.
+        /// </summary>
         private void CboGiangVien_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (cboGiangVien.SelectedValue != null)
-            {
-                string maGV = cboGiangVien.SelectedValue.ToString().Trim().ToUpperInvariant();
-                if (!maGV.Contains("SYSTEM.DATA"))
-                {
-                    txtUsername.Text = maGV;
-                }
-            }
+            if (_isSyncingSelection) return;
+
+            DataRowView drv = cboGiangVien.SelectedItem as DataRowView;
+            if (drv == null) return;
+
+            string maGV = Convert.ToString(drv["MAGV"]).Trim();
+            SyncSelectionByMaGV(maGV, false, true);
         }
 
         /// <summary>
-        /// Logic giao diện theo đúng mục VI.2:
-        /// - Giáo viên chưa có Login (0) -> Hiển thị nút [Tạo tài khoản]
-        /// - Giáo viên có Login đang hoạt động (1) -> Hiển thị nút [Thu hồi tài khoản]
-        /// - Giáo viên có Login đã bị vô hiệu hóa (2) -> Hiển thị nút [Kích hoạt lại tài khoản]
+        /// Khi người dùng click chọn một dòng trên bảng DataGridView bên phải:
+        /// Đồng bộ sang ComboBox bên trái mà không gây vòng lặp sự kiện.
         /// </summary>
         private void DgvTaiKhoanGV_SelectionChanged(object sender, EventArgs e)
         {
+            if (_isSyncingSelection) return;
+
             if (dgvTaiKhoanGV.CurrentRow == null || dgvTaiKhoanGV.CurrentRow.Index < 0)
             {
                 btnContextualCreate.Visible = false;
@@ -392,41 +425,112 @@ namespace TRAC_NGHIEM.Forms
                 return;
             }
 
-            DataGridViewRow row = dgvTaiKhoanGV.CurrentRow;
-            string maGV = Convert.ToString(row.Cells["MAGV"].Value).Trim();
-            string hoTen = row.DataGridView.Columns.Contains("HOTEN_GV")
-                ? Convert.ToString(row.Cells["HOTEN_GV"].Value).Trim()
-                : maGV;
-            int statusCode = row.DataGridView.Columns.Contains("TRANGTHAI_CODE")
-                ? Convert.ToInt32(row.Cells["TRANGTHAI_CODE"].Value)
-                : 0;
-            string statusText = Convert.ToString(row.Cells["TRANGTHAI_TEXT"].Value).Trim();
+            string maGV = Convert.ToString(dgvTaiKhoanGV.CurrentRow.Cells["MAGV"].Value).Trim();
+            SyncSelectionByMaGV(maGV, true, false);
+        }
 
+        private void SyncSelectionByMaGV(string maGV, bool updateCombo, bool updateGrid)
+        {
+            if (string.IsNullOrEmpty(maGV)) return;
+
+            _isSyncingSelection = true;
+            try
+            {
+                if (updateCombo && cboGiangVien.DataSource != null)
+                {
+                    cboGiangVien.SelectedValue = maGV;
+                }
+
+                DataGridViewRow matchedRow = null;
+                foreach (DataGridViewRow row in dgvTaiKhoanGV.Rows)
+                {
+                    if (string.Equals(Convert.ToString(row.Cells["MAGV"].Value).Trim(), maGV, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchedRow = row;
+                        break;
+                    }
+                }
+
+                if (matchedRow != null)
+                {
+                    if (updateGrid)
+                    {
+                        // Đặt CurrentCell trước khi đặt Selected để CurrentRow luôn trỏ đúng dòng mới
+                        dgvTaiKhoanGV.CurrentCell = matchedRow.Cells[0];
+                        matchedRow.Selected = true;
+                    }
+
+                    string hoTen = matchedRow.DataGridView.Columns.Contains("HOTEN_GV")
+                        ? Convert.ToString(matchedRow.Cells["HOTEN_GV"].Value).Trim()
+                        : (Convert.ToString(matchedRow.Cells["HO"].Value).Trim() + " " + Convert.ToString(matchedRow.Cells["TEN"].Value).Trim());
+                    int statusCode = matchedRow.DataGridView.Columns.Contains("TRANGTHAI_CODE")
+                        ? Convert.ToInt32(matchedRow.Cells["TRANGTHAI_CODE"].Value)
+                        : 0;
+                    string statusText = Convert.ToString(matchedRow.Cells["TRANGTHAI_TEXT"].Value).Trim();
+
+                    ApplyTeacherStateToUI(maGV, hoTen, statusCode, statusText);
+                }
+            }
+            finally
+            {
+                _isSyncingSelection = false;
+            }
+        }
+
+        private void ApplyTeacherStateToUI(string maGV, string hoTen, int statusCode, string statusText)
+        {
+            _currentSelectedStatusCode = statusCode;
+            txtUsername.Text = maGV;
             lblSelectedTeacherStatus.Text = string.Format("Đang chọn: {0} - {1} ({2})", maGV, hoTen, statusText);
 
-            if (statusCode == 0) // Chưa tạo
+            if (statusCode == 0) // Chưa tạo SQL Login
             {
                 btnContextualCreate.Visible = true;
                 btnThuHoiTaiKhoan.Visible = false;
                 btnKichHoatLaiTaiKhoan.Visible = false;
 
-                // Đồng bộ chọn giáo viên bên khung Tạo tài khoản
-                if (cboGiangVien.Enabled)
-                {
-                    cboGiangVien.SelectedValue = maGV;
-                }
+                lblPassword.Text = "3. Mật khẩu SQL Login (Tối thiểu 6 ký tự):";
+                txtPassword.Enabled = true;
+                txtConfirmPassword.Enabled = true;
+                chkShowPass.Enabled = true;
+
+                btnTaoTaiKhoan.Text = "TẠO TÀI KHOẢN";
+                btnTaoTaiKhoan.BackColor = Color.FromArgb(22, 163, 74);
+                btnTaoTaiKhoan.Enabled = true;
             }
-            else if (statusCode == 1) // Đang hoạt động
+            else if (statusCode == 1) // Đang hoạt động -> Nút Thu hồi tài khoản
             {
                 btnContextualCreate.Visible = false;
                 btnThuHoiTaiKhoan.Visible = true;
                 btnKichHoatLaiTaiKhoan.Visible = false;
+
+                lblPassword.Text = "3. Mật khẩu SQL Login (Đã cấp tài khoản):";
+                txtPassword.Clear();
+                txtConfirmPassword.Clear();
+                txtPassword.Enabled = false;
+                txtConfirmPassword.Enabled = false;
+                chkShowPass.Enabled = false;
+
+                btnTaoTaiKhoan.Text = "THU HỒI TÀI KHOẢN";
+                btnTaoTaiKhoan.BackColor = Color.FromArgb(220, 38, 38);
+                btnTaoTaiKhoan.Enabled = true;
             }
-            else if (statusCode == 2) // Đã vô hiệu hóa
+            else if (statusCode == 2) // Đã vô hiệu hóa -> Nút Kích hoạt lại
             {
                 btnContextualCreate.Visible = false;
                 btnThuHoiTaiKhoan.Visible = false;
                 btnKichHoatLaiTaiKhoan.Visible = true;
+
+                lblPassword.Text = "3. Mật khẩu SQL Login (Đang bị vô hiệu hóa):";
+                txtPassword.Clear();
+                txtConfirmPassword.Clear();
+                txtPassword.Enabled = false;
+                txtConfirmPassword.Enabled = false;
+                chkShowPass.Enabled = false;
+
+                btnTaoTaiKhoan.Text = "KÍCH HOẠT LẠI";
+                btnTaoTaiKhoan.BackColor = Color.FromArgb(37, 99, 235);
+                btnTaoTaiKhoan.Enabled = true;
             }
         }
 
@@ -434,13 +538,27 @@ namespace TRAC_NGHIEM.Forms
         {
             if (dgvTaiKhoanGV.CurrentRow == null) return;
             string maGV = Convert.ToString(dgvTaiKhoanGV.CurrentRow.Cells["MAGV"].Value).Trim();
-
-            if (cboGiangVien.Enabled)
+            SyncSelectionByMaGV(maGV, true, false);
+            if (txtPassword.Enabled)
             {
-                cboGiangVien.SelectedValue = maGV;
-                txtUsername.Text = maGV;
                 txtPassword.Focus();
             }
+        }
+
+        private void BtnMainAction_Click(object sender, EventArgs e)
+        {
+            if (_currentSelectedStatusCode == 1)
+            {
+                BtnThuHoiTaiKhoan_Click(sender, e);
+                return;
+            }
+            if (_currentSelectedStatusCode == 2)
+            {
+                BtnKichHoatLaiTaiKhoan_Click(sender, e);
+                return;
+            }
+
+            BtnTaoTaiKhoan_Click(sender, e);
         }
 
         private void BtnTaoTaiKhoan_Click(object sender, EventArgs e)
@@ -449,7 +567,7 @@ namespace TRAC_NGHIEM.Forms
 
             if (cboGiangVien.SelectedValue == null)
             {
-                MessageBox.Show("Hiện tất cả giáo viên trong bảng GIAOVIEN đều đã được cấp SQL Login!",
+                MessageBox.Show("Vui lòng chọn một giáo viên trong danh sách!",
                     "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -482,14 +600,6 @@ namespace TRAC_NGHIEM.Forms
             }
         }
 
-        /// <summary>
-        /// Quy trình Thu hồi Login (Mục VI.3):
-        /// 1. Xác định MAGV & SQL Login tương ứng.
-        /// 2. Kiểm tra trạng thái hiện tại.
-        /// 3. Hiển thị hộp thoại xác nhận.
-        /// 4. Thực hiện vô hiệu hóa Login (ALTER LOGIN [...] DISABLE).
-        /// 5. Làm mới danh sách & thông báo kết quả.
-        /// </summary>
         private void BtnThuHoiTaiKhoan_Click(object sender, EventArgs e)
         {
             if (_isBusy || dgvTaiKhoanGV.CurrentRow == null) return;
@@ -514,6 +624,7 @@ namespace TRAC_NGHIEM.Forms
             {
                 _isBusy = true;
                 btnThuHoiTaiKhoan.Enabled = false;
+                btnTaoTaiKhoan.Enabled = false;
 
                 string thongBao;
                 if (_bll.ThuHoiTaiKhoanGiaoVien(maGV, out thongBao))
@@ -530,13 +641,10 @@ namespace TRAC_NGHIEM.Forms
             {
                 _isBusy = false;
                 btnThuHoiTaiKhoan.Enabled = true;
+                btnTaoTaiKhoan.Enabled = true;
             }
         }
 
-        /// <summary>
-        /// Quy trình Kích hoạt lại Login đã bị thu hồi (Mục VI.5):
-        /// Thực hiện ALTER LOGIN [...] ENABLE và kiểm tra lại Database User / role_GiaoVien.
-        /// </summary>
         private void BtnKichHoatLaiTaiKhoan_Click(object sender, EventArgs e)
         {
             if (_isBusy || dgvTaiKhoanGV.CurrentRow == null) return;
@@ -558,6 +666,7 @@ namespace TRAC_NGHIEM.Forms
             {
                 _isBusy = true;
                 btnKichHoatLaiTaiKhoan.Enabled = false;
+                btnTaoTaiKhoan.Enabled = false;
 
                 string thongBao;
                 if (_bll.KichHoatLaiTaiKhoanGiaoVien(maGV, out thongBao))
@@ -574,19 +683,7 @@ namespace TRAC_NGHIEM.Forms
             {
                 _isBusy = false;
                 btnKichHoatLaiTaiKhoan.Enabled = true;
-            }
-        }
-
-        private void SelectTeacherRow(string maGV)
-        {
-            foreach (DataGridViewRow row in dgvTaiKhoanGV.Rows)
-            {
-                if (string.Equals(Convert.ToString(row.Cells["MAGV"].Value).Trim(), maGV.Trim(), StringComparison.OrdinalIgnoreCase))
-                {
-                    row.Selected = true;
-                    dgvTaiKhoanGV.CurrentCell = row.Cells[0];
-                    break;
-                }
+                btnTaoTaiKhoan.Enabled = true;
             }
         }
     }

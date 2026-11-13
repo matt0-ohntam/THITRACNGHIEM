@@ -50,12 +50,14 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="BLL\BackupRestoreBLL.cs" />
+    <Compile Include="BLL\BaoCaoBLL.cs" />
     <Compile Include="BLL\GiaoVienBLL.cs" />
     <Compile Include="BLL\LopBLL.cs" />
     <Compile Include="BLL\MonHocBLL.cs" />
     <Compile Include="BLL\SinhVienBLL.cs" />
     <Compile Include="BLL\TaiKhoanBLL.cs" />
     <Compile Include="DAL\BackupRestoreDAL.cs" />
+    <Compile Include="DAL\BaoCaoDAL.cs" />
     <Compile Include="DAL\DatabaseConnection.cs" />
     <Compile Include="DAL\GiaoVienDAL.cs" />
     <Compile Include="DAL\LopDAL.cs" />
@@ -63,6 +65,9 @@
     <Compile Include="DAL\SinhVienDAL.cs" />
     <Compile Include="DAL\TaiKhoanDAL.cs" />
     <Compile Include="Forms\FrmBackupRestore.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\FrmBangDiemMonHoc.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Forms\FrmDoiMatKhau.cs">
@@ -84,6 +89,9 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Forms\FrmTaoTaiKhoan.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\FrmXemKetQua.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Helpers\SecurityHelper.cs" />

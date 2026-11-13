@@ -1662,6 +1662,288 @@ BEGIN
 END;
 GO
 
+-- 7.10. Stored Procedure cho Mục 7b (Xem kết quả - In lại các câu đã thi) & Mục 8 (Bảng điểm môn học)
+CREATE PROCEDURE dbo.sp_LayDanhSachBaiThiDaCo
+    @MaLop  NCHAR(8) = NULL,
+    @MaSV   NCHAR(8) = NULL,
+    @MaMH   NCHAR(5) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @CallerLogin NVARCHAR(128) = UPPER(LTRIM(RTRIM(SUSER_SNAME())));
+    DECLARE @FilterMaLop NVARCHAR(8) = NULLIF(UPPER(LTRIM(RTRIM(ISNULL(@MaLop, N'')))), N'');
+    DECLARE @FilterMaSV  NVARCHAR(8) = NULLIF(UPPER(LTRIM(RTRIM(ISNULL(@MaSV, N'')))), N'');
+    DECLARE @FilterMaMH  NVARCHAR(5) = NULLIF(UPPER(LTRIM(RTRIM(ISNULL(@MaMH, N'')))), N'');
+
+    IF IS_MEMBER(N'role_SinhVien') = 1
+       AND IS_MEMBER(N'role_GiaoVien') = 0
+       AND IS_MEMBER(N'db_owner') = 0
+       AND IS_SRVROLEMEMBER(N'sysadmin', SUSER_SNAME()) = 0
+    BEGIN
+        SET @FilterMaSV = @CallerLogin;
+    END
+
+    SELECT
+        RTRIM(bd.MASV) AS MASV,
+        (sv.HO + N' ' + sv.TEN) AS HOTEN,
+        RTRIM(sv.MALOP) AS MALOP,
+        l.TENLOP,
+        RTRIM(bd.MAMH) AS MAMH,
+        mh.TENMH,
+        bd.LAN,
+        ISNULL(RTRIM(dk.TRINHDO), N'A') AS TRINHDO,
+        bd.NGAYTHI,
+        bd.DIEM,
+        ISNULL(dk.SOCAUTHI, 10) AS SOCAUTHI,
+        (RTRIM(bd.MASV) + N' - ' + sv.HO + N' ' + sv.TEN + N' | ' + RTRIM(bd.MAMH) + N' (Lần ' + CONVERT(NVARCHAR(5), bd.LAN) + N') - Điểm: ' + CONVERT(NVARCHAR(10), CAST(ROUND(bd.DIEM, 1) AS DECIMAL(4,1)))) AS HIENTHI_PHIEU
+    FROM dbo.BANGDIEM bd
+    INNER JOIN dbo.SINHVIEN sv ON bd.MASV = sv.MASV
+    INNER JOIN dbo.LOP l ON sv.MALOP = l.MALOP
+    INNER JOIN dbo.MONHOC mh ON bd.MAMH = mh.MAMH
+    LEFT JOIN dbo.GIAOVIEN_DANGKY dk
+        ON dk.MALOP = sv.MALOP AND dk.MAMH = bd.MAMH AND dk.LAN = bd.LAN
+    WHERE (@FilterMaLop IS NULL OR RTRIM(sv.MALOP) = @FilterMaLop)
+      AND (@FilterMaSV IS NULL OR RTRIM(bd.MASV) = @FilterMaSV)
+      AND (@FilterMaMH IS NULL OR RTRIM(bd.MAMH) = @FilterMaMH)
+    ORDER BY bd.NGAYTHI DESC, bd.MASV ASC, bd.MAMH ASC, bd.LAN ASC;
+END;
+GO
+
+CREATE PROCEDURE dbo.sp_LayThongTinHeaderKetQua
+    @MaSV   NCHAR(8),
+    @MaMH   NCHAR(5),
+    @Lan    SMALLINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @CallerLogin NVARCHAR(128) = UPPER(LTRIM(RTRIM(SUSER_SNAME())));
+    DECLARE @CleanMaSV NVARCHAR(8) = UPPER(LTRIM(RTRIM(ISNULL(@MaSV, N''))));
+    DECLARE @CleanMaMH NVARCHAR(5) = UPPER(LTRIM(RTRIM(ISNULL(@MaMH, N''))));
+
+    IF IS_MEMBER(N'role_SinhVien') = 1
+       AND IS_MEMBER(N'role_GiaoVien') = 0
+       AND IS_MEMBER(N'db_owner') = 0
+       AND IS_SRVROLEMEMBER(N'sysadmin', SUSER_SNAME()) = 0
+    BEGIN
+        IF @CleanMaSV <> @CallerLogin
+        BEGIN
+            RAISERROR(N'Từ chối truy cập: Sinh viên [%s] chỉ được phép xem kết quả bài thi của chính mình!', 16, 1, @CallerLogin);
+            RETURN;
+        END
+    END
+
+    SELECT
+        RTRIM(l.MALOP) AS MALOP,
+        l.TENLOP,
+        RTRIM(sv.MASV) AS MASV,
+        sv.HO,
+        sv.TEN,
+        (sv.HO + N' ' + sv.TEN) AS HOTEN,
+        sv.NGAYSINH,
+        RTRIM(mh.MAMH) AS MAMH,
+        mh.TENMH,
+        ISNULL(RTRIM(dk.TRINHDO), N'A') AS TRINHDO,
+        bd.NGAYTHI,
+        bd.LAN,
+        ISNULL(dk.SOCAUTHI, 10) AS SOCAUTHI,
+        ISNULL(dk.THOIGIAN, 15) AS THOIGIAN,
+        bd.DIEM
+    FROM dbo.BANGDIEM bd
+    INNER JOIN dbo.SINHVIEN sv ON bd.MASV = sv.MASV
+    INNER JOIN dbo.LOP l ON sv.MALOP = l.MALOP
+    INNER JOIN dbo.MONHOC mh ON bd.MAMH = mh.MAMH
+    LEFT JOIN dbo.GIAOVIEN_DANGKY dk
+        ON dk.MALOP = sv.MALOP AND dk.MAMH = bd.MAMH AND dk.LAN = bd.LAN
+    WHERE RTRIM(bd.MASV) = @CleanMaSV
+      AND RTRIM(bd.MAMH) = @CleanMaMH
+      AND bd.LAN = @Lan;
+END;
+GO
+
+CREATE PROCEDURE dbo.sp_XemKetQuaBaiThi
+    @MaSV   NCHAR(8),
+    @MaMH   NCHAR(5),
+    @Lan    SMALLINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @CallerLogin NVARCHAR(128) = UPPER(LTRIM(RTRIM(SUSER_SNAME())));
+    DECLARE @CleanMaSV NVARCHAR(8) = UPPER(LTRIM(RTRIM(ISNULL(@MaSV, N''))));
+    DECLARE @CleanMaMH NVARCHAR(5) = UPPER(LTRIM(RTRIM(ISNULL(@MaMH, N''))));
+
+    IF IS_MEMBER(N'role_SinhVien') = 1
+       AND IS_MEMBER(N'role_GiaoVien') = 0
+       AND IS_MEMBER(N'db_owner') = 0
+       AND IS_SRVROLEMEMBER(N'sysadmin', SUSER_SNAME()) = 0
+    BEGIN
+        IF @CleanMaSV <> @CallerLogin
+        BEGIN
+            RAISERROR(N'Từ chối truy cập: Sinh viên [%s] chỉ được phép xem chi tiết câu hỏi bài thi của chính mình!', 16, 1, @CallerLogin);
+            RETURN;
+        END
+    END
+
+    DECLARE @BaiThi NVARCHAR(MAX);
+    SELECT @BaiThi = BAITHI
+    FROM dbo.BANGDIEM
+    WHERE RTRIM(MASV) = @CleanMaSV
+      AND RTRIM(MAMH) = @CleanMaMH
+      AND LAN = @Lan;
+
+    IF @BaiThi IS NULL
+    BEGIN
+        RAISERROR(N'Không tìm thấy bài thi của sinh viên [%s] - Môn [%s] - Lần [%d]!', 16, 1, @CleanMaSV, @CleanMaMH, @Lan);
+        RETURN;
+    END
+
+    DECLARE @Parsed TABLE (
+        STT     INT IDENTITY(1,1) PRIMARY KEY,
+        CAUHOI  INT,
+        DA_CHON NVARCHAR(10)
+    );
+
+    DECLARE @Work NVARCHAR(MAX) = LTRIM(RTRIM(@BaiThi));
+    DECLARE @SemiPos INT;
+    DECLARE @ColonPos INT;
+    DECLARE @Token NVARCHAR(100);
+    DECLARE @CauStr NVARCHAR(20);
+    DECLARE @ChonStr NVARCHAR(10);
+
+    WHILE LEN(@Work) > 0
+    BEGIN
+        SET @SemiPos = CHARINDEX(N';', @Work);
+        IF @SemiPos > 0
+        BEGIN
+            SET @Token = LTRIM(RTRIM(LEFT(@Work, @SemiPos - 1)));
+            SET @Work = LTRIM(RTRIM(SUBSTRING(@Work, @SemiPos + 1, LEN(@Work))));
+        END
+        ELSE
+        BEGIN
+            SET @Token = LTRIM(RTRIM(@Work));
+            SET @Work = N'';
+        END
+
+        SET @ColonPos = CHARINDEX(N':', @Token);
+        IF @ColonPos > 1
+        BEGIN
+            SET @CauStr = LTRIM(RTRIM(LEFT(@Token, @ColonPos - 1)));
+            SET @ChonStr = UPPER(LTRIM(RTRIM(SUBSTRING(@Token, @ColonPos + 1, 10))));
+            IF TRY_CAST(@CauStr AS INT) IS NOT NULL
+            BEGIN
+                INSERT INTO @Parsed (CAUHOI, DA_CHON)
+                VALUES (TRY_CAST(@CauStr AS INT), @ChonStr);
+            END
+        END
+    END
+
+    SELECT
+        p.STT AS [STT],
+        b.CAUHOI AS [CAUHOI],
+        RTRIM(b.TRINHDO) AS [TRINHDO],
+        b.NOIDUNG AS [NOIDUNG],
+        b.A AS [A],
+        b.B AS [B],
+        b.C AS [C],
+        b.D AS [D],
+        (b.NOIDUNG + CHAR(13) + CHAR(10) +
+         N'A. ' + b.A + N'   |   B. ' + b.B + N'   |   C. ' + b.C + N'   |   D. ' + b.D) AS [NOIDUNG_VA_LUA_CHON],
+        ISNULL(NULLIF(p.DA_CHON, N''), N'(Bỏ trống)') AS [DA_CHON],
+        RTRIM(b.DAP_AN) AS [DAP_AN],
+        CASE
+            WHEN UPPER(RTRIM(p.DA_CHON)) = UPPER(RTRIM(b.DAP_AN)) THEN N'Đúng'
+            ELSE N'Sai'
+        END AS [KET_QUA]
+    FROM @Parsed p
+    INNER JOIN dbo.BODE b ON b.CAUHOI = p.CAUHOI
+    ORDER BY p.STT ASC;
+END;
+GO
+
+CREATE PROCEDURE dbo.sp_BaoCaoBangDiemMonHoc
+    @MaLop  NCHAR(8),
+    @MaMH   NCHAR(5),
+    @Lan    SMALLINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF IS_MEMBER(N'role_GiaoVien') = 0
+       AND IS_MEMBER(N'db_owner') = 0
+       AND IS_SRVROLEMEMBER(N'sysadmin', SUSER_SNAME()) = 0
+    BEGIN
+        DECLARE @Caller NVARCHAR(128) = SUSER_SNAME();
+        RAISERROR(N'Từ chối truy cập: Tài khoản [%s] không thuộc role_GiaoVien nên không có quyền xuất Bảng điểm môn học của lớp!', 16, 1, @Caller);
+        RETURN;
+    END
+
+    DECLARE @CleanMaLop NVARCHAR(8) = UPPER(LTRIM(RTRIM(ISNULL(@MaLop, N''))));
+    DECLARE @CleanMaMH  NVARCHAR(5) = UPPER(LTRIM(RTRIM(ISNULL(@MaMH, N''))));
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.LOP WHERE RTRIM(MALOP) = @CleanMaLop)
+    BEGIN
+        RAISERROR(N'Mã lớp [%s] không tồn tại!', 16, 1, @CleanMaLop);
+        RETURN;
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.MONHOC WHERE RTRIM(MAMH) = @CleanMaMH AND DAXOA = 0)
+    BEGIN
+        RAISERROR(N'Mã môn học [%s] không tồn tại!', 16, 1, @CleanMaMH);
+        RETURN;
+    END
+
+    SELECT
+        ROW_NUMBER() OVER (ORDER BY sv.TEN ASC, sv.HO ASC, sv.MASV ASC) AS [STT],
+        RTRIM(sv.MASV) AS [MASV],
+        sv.HO AS [HO],
+        sv.TEN AS [TEN],
+        (sv.HO + N' ' + sv.TEN) AS [HOTEN],
+        sv.NGAYSINH AS [NGAYSINH],
+        ISNULL(bd.NGAYTHI, dk.NGAYTHI) AS [NGAYTHI],
+        CASE WHEN bd.DIEM IS NOT NULL THEN 1 ELSE 0 END AS [CO_DIEM],
+        bd.DIEM AS [DIEM],
+        CASE
+            WHEN bd.DIEM IS NOT NULL THEN CONVERT(NVARCHAR(10), CAST(ROUND(bd.DIEM, 1) AS DECIMAL(4,1)))
+            ELSE N'Chưa thi'
+        END AS [DIEM_SO_TEXT],
+        CASE
+            WHEN bd.DIEM IS NULL THEN N'Chưa dự thi'
+            WHEN ROUND(bd.DIEM, 1) = 10.0 THEN N'Mười điểm'
+            WHEN ROUND(bd.DIEM, 1) >= 9.0 THEN N'Chín điểm'
+            WHEN ROUND(bd.DIEM, 1) >= 8.0 THEN N'Tám điểm'
+            WHEN ROUND(bd.DIEM, 1) >= 7.0 THEN N'Bảy điểm'
+            WHEN ROUND(bd.DIEM, 1) >= 6.0 THEN N'Sáu điểm'
+            WHEN ROUND(bd.DIEM, 1) >= 5.0 THEN N'Năm điểm'
+            WHEN ROUND(bd.DIEM, 1) >= 4.0 THEN N'Bốn điểm'
+            WHEN ROUND(bd.DIEM, 1) >= 3.0 THEN N'Ba điểm'
+            WHEN ROUND(bd.DIEM, 1) >= 2.0 THEN N'Hai điểm'
+            WHEN ROUND(bd.DIEM, 1) >= 1.0 THEN N'Một điểm'
+            ELSE N'Không điểm'
+        END AS [DIEM_CHU],
+        CASE
+            WHEN bd.DIEM IS NULL THEN N'Vắng / Chưa thi'
+            WHEN bd.DIEM >= 5.0 THEN N'Đạt'
+            ELSE N'Không đạt'
+        END AS [GHI_CHU],
+        l.TENLOP AS [TENLOP],
+        mh.TENMH AS [TENMH],
+        ISNULL(RTRIM(dk.TRINHDO), N'A') AS [TRINHDO]
+    FROM dbo.SINHVIEN sv
+    INNER JOIN dbo.LOP l ON sv.MALOP = l.MALOP
+    CROSS JOIN dbo.MONHOC mh
+    LEFT JOIN dbo.BANGDIEM bd
+        ON bd.MASV = sv.MASV AND RTRIM(bd.MAMH) = @CleanMaMH AND bd.LAN = @Lan
+    LEFT JOIN dbo.GIAOVIEN_DANGKY dk
+        ON dk.MALOP = sv.MALOP AND RTRIM(dk.MAMH) = @CleanMaMH AND dk.LAN = @Lan
+    WHERE RTRIM(sv.MALOP) = @CleanMaLop
+      AND sv.DAXOA = 0
+      AND RTRIM(mh.MAMH) = @CleanMaMH
+    ORDER BY sv.TEN ASC, sv.HO ASC, sv.MASV ASC;
+END;
+GO
+
 /*==============================================================================
   PHẦN 8: THIẾT LẬP CERTIFICATE SIGNING & PHÂN QUYỀN DATABASE ROLE
 ==============================================================================*/
@@ -1695,6 +1977,10 @@ ADD SIGNATURE TO dbo.sp_XoaSinhVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghi
 ADD SIGNATURE TO dbo.sp_PhucHoiSinhVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
 ADD SIGNATURE TO dbo.sp_HoanTacThemSinhVien BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
 ADD SIGNATURE TO dbo.sp_LayThongTinDangNhapHienTai BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_LayDanhSachBaiThiDaCo BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_LayThongTinHeaderKetQua BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_XemKetQuaBaiThi BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
+ADD SIGNATURE TO dbo.sp_BaoCaoBangDiemMonHoc BY CERTIFICATE [cert_QuanLyTaiKhoan_TracNghiem] WITH PASSWORD = N'Ptit_Cert_TracNghiem#2026!';
 GO
 
 DECLARE @CertBin VARBINARY(MAX) = CERTENCODED(CERT_ID(N'cert_QuanLyTaiKhoan_TracNghiem'));
@@ -1764,6 +2050,10 @@ GRANT EXECUTE ON dbo.sp_DoiMatKhau TO [role_GiaoVien];
 GRANT EXECUTE ON dbo.sp_LayThongKeTongQuan TO [role_GiaoVien];
 GRANT EXECUTE ON dbo.sp_LayLichThiSinhVien TO [role_GiaoVien];
 GRANT EXECUTE ON dbo.sp_LayKetQuaThiCaNhan TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_LayDanhSachBaiThiDaCo TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_LayThongTinHeaderKetQua TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_XemKetQuaBaiThi TO [role_GiaoVien];
+GRANT EXECUTE ON dbo.sp_BaoCaoBangDiemMonHoc TO [role_GiaoVien];
 
 GRANT BACKUP DATABASE TO [role_GiaoVien];
 GRANT VIEW DEFINITION TO [role_GiaoVien];
@@ -1773,6 +2063,10 @@ GO
 GRANT EXECUTE ON dbo.sp_LayThongTinDangNhapHienTai TO [role_SinhVien];
 GRANT EXECUTE ON dbo.sp_LayLichThiSinhVien TO [role_SinhVien];
 GRANT EXECUTE ON dbo.sp_LayKetQuaThiCaNhan TO [role_SinhVien];
+GRANT EXECUTE ON dbo.sp_LayDanhSachBaiThiDaCo TO [role_SinhVien];
+GRANT EXECUTE ON dbo.sp_LayThongTinHeaderKetQua TO [role_SinhVien];
+GRANT EXECUTE ON dbo.sp_XemKetQuaBaiThi TO [role_SinhVien];
+DENY EXECUTE ON dbo.sp_BaoCaoBangDiemMonHoc TO [role_SinhVien];
 
 DENY INSERT, UPDATE, DELETE ON dbo.LOP TO [role_SinhVien];
 DENY INSERT, UPDATE, DELETE ON dbo.MONHOC TO [role_SinhVien];

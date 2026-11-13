@@ -264,6 +264,32 @@ namespace TRAC_NGHIEM
                 bool tc22 = tc22Restore && dtPostRestore != null && dtPostRestore.Rows.Count == 11;
                 LogResult("TC22 - Phục hồi (Restore) CSDL TRAC_NGHIEM an toàn & kiểm tra dữ liệu sau phục hồi", tc22, msg);
                 allPassed &= tc22;
+
+                // TC23: Kiểm tra Mục 7b - Xem kết quả (In lại các câu đã thi) & Phân quyền Sinh viên
+                BaoCaoBLL bcBll = new BaoCaoBLL();
+                DataRow header7b;
+                DataTable dtCau7b;
+                bool gvView7b = bcBll.XemKetQuaBaiThi("SV001", "CSDL", 1, out header7b, out dtCau7b, out msg)
+                                && header7b != null && dtCau7b != null && dtCau7b.Rows.Count == 10;
+                tkBll.DangNhap("SV001", "123456", out tk, out msg);
+                DataRow svHeader;
+                DataTable svCau;
+                bool svOwn7b = bcBll.XemKetQuaBaiThi("SV001", "CSDL", 1, out svHeader, out svCau, out msg)
+                               && svCau != null && svCau.Rows.Count == 10;
+                bool svOtherBlocked7b = !bcBll.XemKetQuaBaiThi("SV002", "CSDL", 1, out svHeader, out svCau, out msg);
+                bool tc23 = gvView7b && svOwn7b && svOtherBlocked7b;
+                LogResult("TC23 - Mục 7b: Xem kết quả (In lại 10 câu đã thi) & Chặn SV xem bài của người khác", tc23, msg);
+                allPassed &= tc23;
+
+                // TC24: Kiểm tra Mục 8 - Bảng điểm môn học (Report theo mẫu trường) & Chặn quyền Sinh viên
+                DataTable dtBangDiem;
+                bool svBlocked8 = !bcBll.LayBangDiemMonHoc("CNTT01", "CSDL", 1, out dtBangDiem, out msg);
+                tkBll.DangNhap("GV001", "123456", out tk, out msg);
+                bool gvReport8 = bcBll.LayBangDiemMonHoc("CNTT01", "CSDL", 1, out dtBangDiem, out msg)
+                                 && dtBangDiem != null && dtBangDiem.Rows.Count == 3;
+                bool tc24 = svBlocked8 && gvReport8;
+                LogResult("TC24 - Mục 8: Bảng điểm môn học (Report lớp CNTT01 - CSDL) & Chặn quyền Sinh viên", tc24, msg);
+                allPassed &= tc24;
             }
             catch (Exception ex)
             {
@@ -272,7 +298,7 @@ namespace TRAC_NGHIEM
             }
 
             string footer = allPassed
-                ? "KẾT QUẢ TỔNG HỢP: 22/22 TEST CASE (GỒM BACKUP & RESTORE) ĐẠT 100% (PASS)"
+                ? "KẾT QUẢ TỔNG HỢP: 24/24 TEST CASE (GỒM 7b, 8 & BACKUP/RESTORE) ĐẠT 100% (PASS)"
                 : "KẾT QUẢ TỔNG HỢP: CÓ TEST CASE CHƯA ĐẠT";
             Console.WriteLine("==================================================================");
             Console.WriteLine(footer);
@@ -319,7 +345,7 @@ namespace TRAC_NGHIEM
             // 3. Nghiệp vụ Giáo viên: Chặn xóa GV001 đang có BODE
             if (gvBll.XoaGiaoVien("GV001", out msg)) { summary = "Lỗ hổng: Cho phép xóa GV001 đang có BODE"; return false; }
 
-            // 4. Khởi tạo toàn bộ 7 Form giao diện của Người 1
+            // 4. Khởi tạo toàn bộ 9 Form giao diện (gồm cả Mục 7b và Mục 8)
             using (FrmMain fMain = new FrmMain())
             using (FrmMonHoc f1 = new FrmMonHoc())
             using (FrmLopSinhVien f2 = new FrmLopSinhVien())
@@ -327,15 +353,17 @@ namespace TRAC_NGHIEM
             using (FrmTaoTaiKhoan f4 = new FrmTaoTaiKhoan())
             using (FrmDoiMatKhau f5 = new FrmDoiMatKhau())
             using (FrmBackupRestore f6 = new FrmBackupRestore())
+            using (FrmXemKetQua f7 = new FrmXemKetQua())
+            using (FrmBangDiemMonHoc f8 = new FrmBangDiemMonHoc())
             {
-                if (fMain == null || f1 == null || f2 == null || f3 == null || f4 == null || f5 == null || f6 == null)
+                if (fMain == null || f1 == null || f2 == null || f3 == null || f4 == null || f5 == null || f6 == null || f7 == null || f8 == null)
                 {
                     summary = "Không thể khởi tạo đầy đủ các Form";
                     return false;
                 }
             }
 
-            summary = "Tất cả Form (FrmMain, FrmMonHoc, FrmLopSinhVien, FrmGiaoVien, FrmTaoTaiKhoan, FrmDoiMatKhau, FrmBackupRestore) và các nút chức năng hoạt động chính xác.";
+            summary = "Tất cả 9 Form (FrmMain, FrmMonHoc, FrmLopSinhVien, FrmGiaoVien, FrmTaoTaiKhoan, FrmDoiMatKhau, FrmBackupRestore, FrmXemKetQua, FrmBangDiemMonHoc) và các nút chức năng hoạt động chính xác.";
             return true;
         }
 

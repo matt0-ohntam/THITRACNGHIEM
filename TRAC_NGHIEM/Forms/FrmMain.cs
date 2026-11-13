@@ -30,6 +30,8 @@ namespace TRAC_NGHIEM.Forms
         private Button btnTaoTaiKhoan;
         private Button btnDoiMatKhau;
         private Button btnBackupRestore;
+        private Button btnXemKetQua;
+        private Button btnBangDiemMonHoc;
         private Button btnDangXuat;
 
         private Panel pnlTopBar;
@@ -107,9 +109,9 @@ namespace TRAC_NGHIEM.Forms
             pnlSidebarHeader.Controls.Add(lblUserNameInfo);
             pnlSidebarHeader.Controls.Add(lblUserRoleBadge);
 
-            int topOffset = 148;
-            int btnHeight = 46;
-            int gap = 4;
+            int topOffset = 144;
+            int btnHeight = 42;
+            int gap = 3;
 
             btnTrangChu = CreateSidebarButton("  Trang chủ (Tổng quan)", topOffset);
             topOffset += btnHeight + gap;
@@ -130,6 +132,12 @@ namespace TRAC_NGHIEM.Forms
             topOffset += btnHeight + gap;
 
             btnBackupRestore = CreateSidebarButton("  6. Backup & Restore CSDL", topOffset);
+            topOffset += btnHeight + gap;
+
+            btnXemKetQua = CreateSidebarButton("  7b. Xem kết quả bài thi", topOffset);
+            topOffset += btnHeight + gap;
+
+            btnBangDiemMonHoc = CreateSidebarButton("  8. Bảng điểm môn học", topOffset);
 
             btnDangXuat = new Button
             {
@@ -154,6 +162,8 @@ namespace TRAC_NGHIEM.Forms
             pnlSidebar.Controls.Add(btnTaoTaiKhoan);
             pnlSidebar.Controls.Add(btnDoiMatKhau);
             pnlSidebar.Controls.Add(btnBackupRestore);
+            pnlSidebar.Controls.Add(btnXemKetQua);
+            pnlSidebar.Controls.Add(btnBangDiemMonHoc);
             pnlSidebar.Controls.Add(btnDangXuat);
             pnlSidebar.Controls.Add(pnlSidebarHeader);
 
@@ -209,6 +219,8 @@ namespace TRAC_NGHIEM.Forms
             btnTaoTaiKhoan.Click += (s, e) => NavigateToModule(btnTaoTaiKhoan, "QUẢN LÝ TÀI KHOẢN GIẢNG VIÊN (SQL LOGIN)");
             btnDoiMatKhau.Click += (s, e) => NavigateToModule(btnDoiMatKhau, "ĐỔI MẬT KHẨU TÀI KHOẢN SQL LOGIN");
             btnBackupRestore.Click += (s, e) => NavigateToModule(btnBackupRestore, "SAO LƯU & PHỤC HỒI CSDL (BACKUP / RESTORE)");
+            btnXemKetQua.Click += (s, e) => NavigateToModule(btnXemKetQua, "7b. XEM KẾT QUẢ & IN LẠI CÁC CÂU ĐÃ THI");
+            btnBangDiemMonHoc.Click += (s, e) => NavigateToModule(btnBangDiemMonHoc, "8. BẢNG ĐIỂM MÔN HỌC (REPORT THEO MẪU TRƯỜNG)");
         }
 
         private Button CreateSidebarButton(string text, int top)
@@ -217,11 +229,11 @@ namespace TRAC_NGHIEM.Forms
             {
                 Text = text,
                 Location = new Point(0, top),
-                Size = new Size(260, 46),
+                Size = new Size(260, 42),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(15, 23, 42),
                 ForeColor = Color.FromArgb(226, 232, 240),
-                Font = new Font("Segoe UI", 10F, FontStyle.Regular),
+                Font = new Font("Segoe UI", 9.75F, FontStyle.Regular),
                 TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(14, 0, 0, 0),
                 Cursor = Cursors.Hand
@@ -236,7 +248,8 @@ namespace TRAC_NGHIEM.Forms
             Button[] allButtons = new Button[]
             {
                 btnTrangChu, btnMonHoc, btnLopSinhVien, btnGiaoVien,
-                btnTaoTaiKhoan, btnDoiMatKhau, btnBackupRestore
+                btnTaoTaiKhoan, btnDoiMatKhau, btnBackupRestore,
+                btnXemKetQua, btnBangDiemMonHoc
             };
 
             foreach (Button btn in allButtons)
@@ -245,13 +258,13 @@ namespace TRAC_NGHIEM.Forms
                 {
                     btn.BackColor = Color.FromArgb(37, 99, 235);
                     btn.ForeColor = Color.White;
-                    btn.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+                    btn.Font = new Font("Segoe UI", 9.75F, FontStyle.Bold);
                 }
                 else
                 {
                     btn.BackColor = Color.FromArgb(15, 23, 42);
                     btn.ForeColor = Color.FromArgb(226, 232, 240);
-                    btn.Font = new Font("Segoe UI", 10F, FontStyle.Regular);
+                    btn.Font = new Font("Segoe UI", 9.75F, FontStyle.Regular);
                 }
             }
             _activeMenuButton = activeBtn;
@@ -297,14 +310,29 @@ namespace TRAC_NGHIEM.Forms
 
             btnBackupRestore.Visible = isGV;
             btnBackupRestore.Enabled = isGV;
+
+            // Mục 7b: Xem kết quả (in lại các câu đã thi) cho phép cả Giáo viên và Sinh viên (sinh viên chỉ xem được bài của mình)
+            btnXemKetQua.Visible = true;
+            btnXemKetQua.Enabled = true;
+            if (!isGV)
+            {
+                btnXemKetQua.Location = new Point(0, 144 + 45);
+            }
+
+            // Mục 8: Bảng điểm môn học của lớp chỉ dành cho Giáo viên
+            btnBangDiemMonHoc.Visible = isGV;
+            btnBangDiemMonHoc.Enabled = isGV;
         }
 
         private void NavigateToModule(Button clickedButton, string title)
         {
             try
             {
-                // Kiểm tra quyền ở tầng xử lý nghiệp vụ trước khi mở bất kỳ form quản trị nào
-                SessionManager.EnsureGiaoVienPermission(title);
+                // Mục 7b (btnXemKetQua) cho phép cả Sinh viên lẫn Giáo viên; các mục quản trị khác bắt buộc role_GiaoVien
+                if (clickedButton != btnXemKetQua)
+                {
+                    SessionManager.EnsureGiaoVienPermission(title);
+                }
 
                 HighlightActiveButton(clickedButton);
                 lblCurrentPageTitle.Text = title;
@@ -338,6 +366,14 @@ namespace TRAC_NGHIEM.Forms
                 else if (clickedButton == btnBackupRestore)
                 {
                     OpenChildForm(new FrmBackupRestore());
+                }
+                else if (clickedButton == btnXemKetQua)
+                {
+                    OpenChildForm(new FrmXemKetQua());
+                }
+                else if (clickedButton == btnBangDiemMonHoc)
+                {
+                    OpenChildForm(new FrmBangDiemMonHoc());
                 }
             }
             catch (UnauthorizedAccessException authEx)
@@ -648,6 +684,22 @@ namespace TRAC_NGHIEM.Forms
             pnlInfo.Controls.Add(lblSvHeader);
             pnlInfo.Controls.Add(lblSvNote);
 
+            Button btnOpen7b = new Button
+            {
+                Text = "Mở Mục 7b: In lại các câu đã thi",
+                Size = new Size(235, 36),
+                Location = new Point(730, 12),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                BackColor = Color.FromArgb(185, 28, 28),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnOpen7b.FlatAppearance.BorderSize = 0;
+            btnOpen7b.Click += (s, e) => NavigateToModule(btnXemKetQua, "7b. XEM KẾT QUẢ & IN LẠI CÁC CÂU ĐÃ THI");
+            pnlInfo.Controls.Add(btnOpen7b);
+
             SplitContainer split = new SplitContainer
             {
                 Dock = DockStyle.Fill,
@@ -733,5 +785,7 @@ namespace TRAC_NGHIEM.Forms
         public Button BtnTaoTaiKhoan { get { return btnTaoTaiKhoan; } }
         public Button BtnDoiMatKhau { get { return btnDoiMatKhau; } }
         public Button BtnBackupRestore { get { return btnBackupRestore; } }
+        public Button BtnXemKetQua { get { return btnXemKetQua; } }
+        public Button BtnBangDiemMonHoc { get { return btnBangDiemMonHoc; } }
     }
 }
